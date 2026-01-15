@@ -270,13 +270,13 @@ function headerLinesForRow(row: ExpenseRow): string[] {
   const purpose = coerceZohoFieldText(row.purpose);
   const amount = formatAmountForHeader(row.amount);
 
-  const lines: string[] = [];
-  lines.push(`Row Number: ${row.rowNumber}`);
-  if (date) lines.push(`Date: ${date}`);
-  if (expenseType) lines.push(`Expense Type: ${expenseType}`);
-  if (purpose) lines.push(`Purpose: ${purpose}`);
-  if (amount) lines.push(`Amount: ${amount}`);
-  return lines;
+  const values: string[] = [];
+  values.push(`Row ${row.rowNumber}`);
+  if (date) values.push(date);
+  if (expenseType) values.push(expenseType);
+  if (purpose) values.push(purpose);
+  if (amount) values.push(amount);
+  return values.length ? [values.join(" | ")] : [];
 }
 
 async function downloadFileUploads(subformRows: ExpenseRow[]) {
@@ -505,13 +505,37 @@ async function createSummaryPage(
       : formType === "mileage-reimbursement"
       ? "Mileage Reimbursement Form"
       : "Expense Reimbursement Form";
+  const titleFontSize = boldFontSize + 4;
   page.drawText(formTitle, {
     x: margin,
     y,
-    size: boldFontSize + 4,
+    size: titleFontSize,
     font: boldFont,
   });
   y -= lineHeight * 2;
+
+  const employeeName = [recordInfo.employee, recordInfo.employeeLastName]
+    .filter(Boolean)
+    .join(" ");
+  if (employeeName) {
+    const label = "Employee Name: ";
+    const labelWidth = boldFont.widthOfTextAtSize(label, titleFontSize);
+    const employeeNameFontSize = titleFontSize - 2;
+    page.drawText(label, {
+      x: margin,
+      y,
+      size: titleFontSize,
+      font: boldFont,
+    });
+    page.drawText(employeeName, {
+      x: margin + labelWidth,
+      y,
+      size: employeeNameFontSize,
+      font,
+    });
+    y -= lineHeight;
+  }
+  y -= lineHeight;
 
   const labelGap = 4;
   function drawLabelValue(label: string, value: string) {
@@ -530,32 +554,13 @@ async function createSummaryPage(
     });
   }
 
-  if (recordInfo.reimbursementFor) {
-    drawLabelValue("Reimbursement For:", recordInfo.reimbursementFor);
-    y -= lineHeight;
-  }
-
   if (recordInfo.facility) {
     drawLabelValue("Facility:", recordInfo.facility);
     y -= lineHeight;
   }
 
-  const employeeName = [recordInfo.employee, recordInfo.employeeLastName]
-    .filter(Boolean)
-    .join(" ");
-  if (employeeName) {
-    drawLabelValue(
-      formType === "petty-cash" ? "Requested By:" : "Employee:",
-      employeeName
-    );
-    y -= lineHeight;
-  }
-
   if (recordInfo.employeeEmail) {
-    drawLabelValue(
-      formType === "petty-cash" ? "Requested By Email:" : "Employee Email:",
-      recordInfo.employeeEmail
-    );
+    drawLabelValue("Employee Email:", recordInfo.employeeEmail);
     y -= lineHeight;
   }
 
@@ -1065,6 +1070,11 @@ async function combinePDFsAndImages(
     }
   }
 
+  function getHeaderAreaHeight(lines: string[]): number {
+    if (!lines.length) return 0;
+    return margin + lines.length * (headerSize + lineGap) + lineGap;
+  }
+
   const drawnHeaders = new Set<string>();
 
   function getHeaderKey(headerLines: string[]): string {
@@ -1082,14 +1092,28 @@ async function combinePDFsAndImages(
   for (let i = 0; i < pdfItems.length; i++) {
     try {
       const pdf = await PDFDocument.load(pdfItems[i].buffer);
-      const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-
+      const sourcePages = pdf.getPages();
+      const embeddedPages = await mergedPdf.embedPages(sourcePages);
       const shouldDraw = shouldDrawHeader(pdfItems[i].headerLines);
-      if (shouldDraw && copiedPages.length > 0) {
-        drawHeader(copiedPages[0], pdfItems[i].headerLines, headerFont);
-      }
+      const headerAreaHeight = shouldDraw
+        ? getHeaderAreaHeight(pdfItems[i].headerLines)
+        : 0;
 
-      copiedPages.forEach((page) => mergedPdf.addPage(page));
+      sourcePages.forEach((sourcePage, pageIndex) => {
+        const { width, height } = sourcePage.getSize();
+        const extraHeight = pageIndex === 0 ? headerAreaHeight : 0;
+        const page = mergedPdf.addPage([width, height + extraHeight]);
+        page.drawPage(embeddedPages[pageIndex], {
+          x: 0,
+          y: 0,
+          width,
+          height,
+        });
+
+        if (pageIndex === 0 && shouldDraw) {
+          drawHeader(page, pdfItems[i].headerLines, headerFont);
+        }
+      });
     } catch (error) {
       console.error("[CCHEALTHCARE] Error merging PDF:", error);
     }
@@ -1125,7 +1149,11 @@ async function combinePDFsAndImages(
         height = height * ratio;
       }
 
-      const page = mergedPdf.addPage([width, height]);
+      const shouldDraw = shouldDrawHeader(headerLines);
+      const headerAreaHeight = shouldDraw
+        ? getHeaderAreaHeight(headerLines)
+        : 0;
+      const page = mergedPdf.addPage([width, height + headerAreaHeight]);
       page.drawImage(image, {
         x: 0,
         y: 0,
@@ -1133,7 +1161,7 @@ async function combinePDFsAndImages(
         height: height,
       });
 
-      if (shouldDrawHeader(headerLines)) {
+      if (shouldDraw) {
         drawHeader(page, headerLines, headerFont);
       }
     } catch (error) {

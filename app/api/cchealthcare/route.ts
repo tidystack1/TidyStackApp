@@ -129,6 +129,7 @@ export async function POST(request: NextRequest) {
       recordDetails,
       reimbursementType
     );
+    const pdfFilename = `combined-${recordId}.pdf`;
 
     await sendSubmittedEmail({
       recordId,
@@ -144,7 +145,12 @@ export async function POST(request: NextRequest) {
 
     const smartSuiteRecord = await createSmartSuiteRecord(
       recordDetails,
-      reimbursementType
+      reimbursementType,
+      {
+        filename: pdfFilename,
+        contentType: "application/pdf",
+        data: pdfBuffer,
+      }
     );
 
     return NextResponse.json(
@@ -185,9 +191,9 @@ async function sendSubmittedEmail({
 
   await transporter.sendMail({
     from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to: "mspitzer@tidystack.com",
+    to: facilityEmail,
     subject: `CCHealthcare ${humanizeFormType(reimbursementType)} submitted`,
-    text: `a form was submitted, in real this would go to the stampli email address: ${facilityEmail}`,
+    text: `A form was submitted`,
     attachments: [
       {
         filename: `combined-${recordId}.pdf`,
@@ -209,9 +215,9 @@ async function sendRequesterEmail({
 
   await transporter.sendMail({
     from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to: "mspitzer+requester@tidystack.com",
+    to: requesterEmail,
     subject: `CCHealthcare ${humanizeFormType(reimbursementType)} received`,
-    text: `your reimbursement request was submitted Successfully, in real this would go to ${requesterEmail}`,
+    text: `Hi, Your form submission to CCH Healtcare was successfully received.`,
   });
 }
 

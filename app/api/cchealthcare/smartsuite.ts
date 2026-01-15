@@ -5,6 +5,14 @@ type SmartSuiteCreateResponse = {
   id?: string;
 };
 
+type SmartSuiteAttachment = {
+  filename: string;
+  contentType: string;
+  data: Buffer;
+};
+
+const SMARTSUITE_ATTACHMENT_FIELD_ID = "s1d6347da1";
+
 const SMARTSUITE_REIMBURSEMENT_FOR: Record<FormType, string> = {
   "expense-reimbursement": "Expense Reimbursement",
   "mileage-reimbursement": "Mileage Reimbursement",
@@ -102,12 +110,12 @@ function buildSmartSuitePayload(
     }
 
     if (formType === "petty-cash") {
-      if (requesterName) {
-        payload.sf2bbc6208 = requesterName;
+      if (requesterName ?? employeeName) {
+        payload.s357536aaf = requesterName ?? employeeName;
       }
 
-      if (requesterEmail) {
-        payload.s22ba4c7b9 = [requesterEmail];
+      if (requesterEmail ?? employeeEmail) {
+        payload.s0df5a9f6c = [requesterEmail ?? employeeEmail!];
       }
     } else {
       if (employeeName) {
@@ -130,7 +138,8 @@ function buildSmartSuitePayload(
 
 export async function createSmartSuiteRecord(
   recordDetails: unknown,
-  formType: FormType
+  formType: FormType,
+  attachment?: SmartSuiteAttachment
 ): Promise<SmartSuiteCreateResponse> {
   const { apiKey, accountId, tableId } = getSmartSuiteConfig();
   const payload = buildSmartSuitePayload(recordDetails, formType);
@@ -155,5 +164,62 @@ export async function createSmartSuiteRecord(
     );
   }
 
-  return response.json();
+  const record = (await response.json()) as SmartSuiteCreateResponse;
+
+  if (attachment && record?.id) {
+    await uploadSmartSuiteAttachment({
+      apiKey,
+      accountId,
+      tableId,
+      recordId: record.id,
+      fieldId: SMARTSUITE_ATTACHMENT_FIELD_ID,
+      attachment,
+    });
+  }
+
+  return record;
+}
+
+async function uploadSmartSuiteAttachment({
+  apiKey,
+  accountId,
+  tableId,
+  recordId,
+  fieldId,
+  attachment,
+}: {
+  apiKey: string;
+  accountId: string;
+  tableId: string;
+  recordId: string;
+  fieldId: string;
+  attachment: SmartSuiteAttachment;
+}) {
+  const formData = new FormData();
+  const fileBytes = new Uint8Array(attachment.data);
+  const fileBlob = new Blob([fileBytes], {
+    type: attachment.contentType,
+  });
+
+  formData.append("files", fileBlob, attachment.filename);
+  formData.append("filename", attachment.filename);
+
+  const response = await fetch(
+    `https://app.smartsuite.com/api/v1/recordfiles/${tableId}/${recordId}/${fieldId}/`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        "ACCOUNT-ID": accountId,
+      },
+      body: formData,
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `SmartSuite attachment upload failed: ${response.status} ${errorText}`
+    );
+  }
 }
