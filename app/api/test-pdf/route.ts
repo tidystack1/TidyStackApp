@@ -12,11 +12,22 @@ function dbg(...args: unknown[]) {
   if (ZOHO_DEBUG) console.log("[TEST:debug]", ...args);
 }
 
+type FormType =
+  | "expense-reimbursement"
+  | "petty-cash"
+  | "mileage-reimbursement";
+
 // Updated to use subform file uploads instead of attachments
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const recordId = body.id;
+    const formType: FormType =
+      body.formType === "petty-cash"
+        ? "petty-cash"
+        : body.formType === "mileage-reimbursement"
+        ? "mileage-reimbursement"
+        : "expense-reimbursement";
 
     if (!recordId) {
       return NextResponse.json(
@@ -32,66 +43,115 @@ export async function POST(request: NextRequest) {
     dbg(`[TEST] Record fetched successfully`);
 
     // Step 2: Extract record info and rows (including all subform fields) + file uploads
-    const recordInfo = extractRecordInfo(recordDetails);
-    const subformRows = extractExpenseReimbursementRows(recordDetails);
-    const totalFilesInSubform = subformRows.reduce(
-      (sum, row) => sum + row.files.length,
-      0
-    );
-    console.log(
-      `[TEST] Found ${subformRows.length} subform row(s), ${totalFilesInSubform} file(s)`
-    );
+    const recordInfo = extractRecordInfo(recordDetails, formType);
+    const subformRows =
+      formType === "mileage-reimbursement"
+        ? extractMileageReimbursementRows(recordDetails)
+        : extractExpenseReimbursementRows(recordDetails);
 
-    if (subformRows.length === 0 || totalFilesInSubform === 0) {
-      return NextResponse.json(
-        {
-          message: "No file uploads found in Expense Reimbursement subform",
-          recordId,
-          attachmentCount: 0,
-          pdfCount: 0,
-        },
-        { status: 200 }
-      );
+    // Calculate totals for mileage reimbursement from subform rows
+    if (formType === "mileage-reimbursement") {
+      const totalMiles = calculateTotalMiles(subformRows as MileageRow[]);
+      const totalAmount = totalMiles * 0.73;
+      recordInfo.totalMiles = totalMiles;
+      recordInfo.totalMilesMultiplied = totalAmount;
     }
 
-    // Step 3: Download PDF and image files from subform
-    const { pdfItems, imageItems } = await downloadFileUploads(subformRows);
-    console.log(
-      `[TEST] Downloaded ${pdfItems.length} PDF(s) and ${imageItems.length} image(s)`
-    );
+    let totalFilesInSubform = 0;
 
-    if (pdfItems.length === 0 && imageItems.length === 0) {
+    if (formType !== "mileage-reimbursement") {
+      totalFilesInSubform = (subformRows as ExpenseRow[]).reduce(
+        (sum, row) => sum + row.files.length,
+        0
+      );
+      console.log(
+        `[TEST] Found ${subformRows.length} subform row(s), ${totalFilesInSubform} file(s)`
+      );
+
+      if (subformRows.length === 0 || totalFilesInSubform === 0) {
+        return NextResponse.json(
+          {
+            message:
+              formType === "petty-cash"
+                ? "No file uploads found in Petty Cash subform"
+                : "No file uploads found in Expense Reimbursement subform",
+            recordId,
+            attachmentCount: 0,
+            pdfCount: 0,
+          },
+          { status: 200 }
+        );
+      }
+
+      // Step 3: Download PDF and image files from subform
+      const { pdfItems, imageItems } = await downloadFileUploads(
+        subformRows as ExpenseRow[]
+      );
+      console.log(
+        `[TEST] Downloaded ${pdfItems.length} PDF(s) and ${imageItems.length} image(s)`
+      );
+
+      if (pdfItems.length === 0 && imageItems.length === 0) {
+        return NextResponse.json(
+          {
+            message: "No PDF or image files found in subform uploads",
+            recordId,
+            attachmentCount: totalFilesInSubform,
+            pdfCount: 0,
+          },
+          { status: 200 }
+        );
+      }
+
+      // Step 4: Combine PDFs and images into one (with summary page first)
+      const combinedPdf = await combinePDFsAndImages(
+        pdfItems,
+        imageItems,
+        recordInfo,
+        subformRows,
+        formType
+      );
+      console.log(`[TEST] Combined into a single PDF successfully`);
+
+      // Convert to base64 for frontend display
+      const base64Pdf = combinedPdf.toString("base64");
+
       return NextResponse.json(
         {
-          message: "No PDF or image files found in subform uploads",
+          message: "Successfully processed PDFs and images",
           recordId,
           attachmentCount: totalFilesInSubform,
-          pdfCount: 0,
+          pdfCount: pdfItems.length + imageItems.length,
+          pdfFiles: pdfItems.length,
+          imageFiles: imageItems.length,
+          pdfBase64: base64Pdf,
+          pdfSize: combinedPdf.length,
+          facility: recordInfo.facility ?? null,
         },
         { status: 200 }
       );
     }
 
-    // Step 4: Combine PDFs and images into one (with summary page first)
+    // Mileage reimbursement: cover page only (no attachments)
+    console.log(`[TEST] Found ${subformRows.length} mileage row(s)`);
     const combinedPdf = await combinePDFsAndImages(
-      pdfItems,
-      imageItems,
+      [],
+      [],
       recordInfo,
-      subformRows
+      subformRows,
+      formType
     );
-    console.log(`[TEST] Combined into a single PDF successfully`);
+    console.log(`[TEST] Generated mileage reimbursement cover page`);
 
-    // Convert to base64 for frontend display
     const base64Pdf = combinedPdf.toString("base64");
-
     return NextResponse.json(
       {
-        message: "Successfully processed PDFs and images",
+        message: "Successfully generated mileage reimbursement cover page",
         recordId,
-        attachmentCount: totalFilesInSubform,
-        pdfCount: pdfItems.length + imageItems.length,
-        pdfFiles: pdfItems.length,
-        imageFiles: imageItems.length,
+        attachmentCount: 0,
+        pdfCount: 1,
+        pdfFiles: 0,
+        imageFiles: 0,
         pdfBase64: base64Pdf,
         pdfSize: combinedPdf.length,
         facility: recordInfo.facility ?? null,
@@ -151,12 +211,32 @@ type ExpenseRow = {
   files: Array<Record<string, unknown>>;
 };
 
+type MileageRow = {
+  // API names from CRM: Date, Origin_Street, Origin_City, Origin_State, Origin_Zip,
+  // Destination_Street, Destination_City, Destination_State, Destination_Zip,
+  // Purpose, Number_Of_Miles
+  rowNumber: number;
+  date?: unknown;
+  originStreet?: unknown;
+  originCity?: unknown;
+  originState?: unknown;
+  originZip?: unknown;
+  destinationStreet?: unknown;
+  destinationCity?: unknown;
+  destinationState?: unknown;
+  destinationZip?: unknown;
+  purpose?: unknown;
+  numberOfMiles?: unknown;
+};
+
 type RecordInfo = {
   reimbursementFor?: string;
   facility?: string;
   employee?: string;
   employeeLastName?: string;
   employeeEmail?: string;
+  totalMiles?: unknown;
+  totalMilesMultiplied?: unknown;
 };
 
 function normalizeFiles(
@@ -167,7 +247,10 @@ function normalizeFiles(
   return isRecord(fileUploadValue) ? [fileUploadValue] : [];
 }
 
-function extractRecordInfo(recordDetails: unknown): RecordInfo {
+function extractRecordInfo(
+  recordDetails: unknown,
+  formType: FormType
+): RecordInfo {
   try {
     const details = recordDetails as ZohoRecordDetails;
     const record = details.data?.[0];
@@ -175,14 +258,26 @@ function extractRecordInfo(recordDetails: unknown): RecordInfo {
       return {};
     }
 
+    const isPettyCash = formType === "petty-cash";
+    const isMileage = formType === "mileage-reimbursement";
+
     return {
       reimbursementFor:
         coerceZohoFieldText(record["Reimbusment_For"]) ?? undefined,
       facility: coerceZohoFieldText(record["Facility"]) ?? undefined,
-      employee: coerceZohoFieldText(record["Employee"]) ?? undefined,
-      employeeLastName:
-        coerceZohoFieldText(record["Employee_Last_Name"]) ?? undefined,
-      employeeEmail: coerceZohoFieldText(record["Employee_Email"]) ?? undefined,
+      employee: isPettyCash
+        ? coerceZohoFieldText(record["Requested_by_First_Name"]) ?? undefined
+        : coerceZohoFieldText(record["Employee"]) ?? undefined,
+      employeeLastName: isPettyCash
+        ? coerceZohoFieldText(record["Requested_by_Last_Name"]) ?? undefined
+        : coerceZohoFieldText(record["Employee_Last_Name"]) ?? undefined,
+      employeeEmail: isPettyCash
+        ? coerceZohoFieldText(record["Requested_by_Email"]) ?? undefined
+        : coerceZohoFieldText(record["Employee_Email"]) ?? undefined,
+      totalMiles: isMileage ? record["Total_Miles"] : undefined,
+      totalMilesMultiplied: isMileage
+        ? record["Total_Miles_multiplied"]
+        : undefined,
     };
   } catch (error) {
     console.error("[TEST] Error extracting record info:", error);
@@ -229,6 +324,70 @@ function extractExpenseReimbursementRows(recordDetails: unknown): ExpenseRow[] {
     console.error("[TEST] Error extracting file uploads from subform:", error);
     return [];
   }
+}
+
+function extractMileageReimbursementRows(recordDetails: unknown): MileageRow[] {
+  try {
+    const details = recordDetails as ZohoRecordDetails;
+    const record = details.data?.[0];
+    if (!record) {
+      console.log("[TEST] No record data found");
+      return [];
+    }
+
+    // Get the Mileage_Reimbursement subform
+    const subformData = record["Mileage_Reimbursement"];
+    if (!subformData || !Array.isArray(subformData)) {
+      console.log("[TEST] No mileage subform data found or it's not an array");
+      return [];
+    }
+
+    dbg(`[TEST] Mileage subform rows: ${subformData.length}`);
+
+    const rows: MileageRow[] = [];
+    subformData.forEach((row: unknown, index: number) => {
+      if (!isRecord(row)) return;
+      rows.push({
+        rowNumber: index + 1,
+        date: row["Date"],
+        originStreet: row["Origin_Street"],
+        originCity: row["Origin_City"],
+        originState: row["Origin_State"],
+        originZip: row["Origin_Zip"],
+        destinationStreet: row["Destination_Street"],
+        destinationCity: row["Destination_City"],
+        destinationState: row["Destination_State"],
+        destinationZip: row["Destination_Zip"],
+        purpose: row["Purpose"],
+        numberOfMiles: row["Number_Of_Miles"],
+      });
+    });
+
+    return rows;
+  } catch (error) {
+    console.error(
+      "[TEST] Error extracting mileage reimbursement rows from subform:",
+      error
+    );
+    return [];
+  }
+}
+
+function calculateTotalMiles(mileageRows: MileageRow[]): number {
+  let total = 0;
+  for (const row of mileageRows) {
+    const miles = row.numberOfMiles;
+    if (miles != null) {
+      const milesNum =
+        typeof miles === "number"
+          ? miles
+          : typeof miles === "string"
+          ? Number(miles) || 0
+          : 0;
+      total += milesNum;
+    }
+  }
+  return total;
 }
 
 type PdfItem = {
@@ -525,10 +684,30 @@ function formatAmountForTable(value: unknown): string {
   return s;
 }
 
+function formatMilesValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  }
+  const s = typeof value === "string" ? value : String(value);
+  const n = Number(s);
+  if (!Number.isNaN(n)) {
+    return Number.isInteger(n) ? String(n) : n.toFixed(2);
+  }
+  return s;
+}
+
+function buildAddress(parts: Array<string | null>): string {
+  const [street, city, state, zip] = parts;
+  const cityStateZip = [city, state, zip].filter(Boolean).join(" ");
+  return [street, cityStateZip].filter(Boolean).join(", ");
+}
+
 async function createSummaryPage(
   pdfDoc: PDFDocument,
   recordInfo: RecordInfo,
-  subformRows: ExpenseRow[]
+  subformRows: ExpenseRow[] | MileageRow[],
+  formType: FormType
 ): Promise<void> {
   const page = pdfDoc.addPage([612, 792]); // Letter size
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -544,7 +723,13 @@ async function createSummaryPage(
   let y = 792 - margin;
 
   // Title
-  page.drawText("Expense Reimbursement Form", {
+  const formTitle =
+    formType === "petty-cash"
+      ? "Petty Cash Form"
+      : formType === "mileage-reimbursement"
+      ? "Mileage Reimbursement Form"
+      : "Expense Reimbursement Form";
+  page.drawText(formTitle, {
     x: margin,
     y,
     size: boldFontSize + 4,
@@ -584,12 +769,18 @@ async function createSummaryPage(
     .filter(Boolean)
     .join(" ");
   if (employeeName) {
-    drawLabelValue("Employee:", employeeName);
+    drawLabelValue(
+      formType === "petty-cash" ? "Requested By:" : "Employee:",
+      employeeName
+    );
     y -= lineHeight;
   }
 
   if (recordInfo.employeeEmail) {
-    drawLabelValue("Employee Email:", recordInfo.employeeEmail);
+    drawLabelValue(
+      formType === "petty-cash" ? "Requested By Email:" : "Employee Email:",
+      recordInfo.employeeEmail
+    );
     y -= lineHeight;
   }
 
@@ -597,31 +788,6 @@ async function createSummaryPage(
 
   // Table headers
   const tableTopY = y;
-  const colWidths = {
-    rowNumber: 60,
-    date: 100,
-    expenseType: 120,
-    purpose: 160,
-    amount: 90,
-  };
-  const colX = {
-    rowNumber: margin,
-    date: margin + colWidths.rowNumber + colGap,
-    expenseType: margin + colWidths.rowNumber + colWidths.date + colGap * 2,
-    purpose:
-      margin +
-      colWidths.rowNumber +
-      colWidths.date +
-      colWidths.expenseType +
-      colGap * 3,
-    amount:
-      margin +
-      colWidths.rowNumber +
-      colWidths.date +
-      colWidths.expenseType +
-      colWidths.purpose +
-      colGap * 4,
-  };
 
   const rowBorderColor = rgb(0.55, 0.55, 0.55);
   const borderWidth = 0.5;
@@ -640,14 +806,6 @@ async function createSummaryPage(
       borderColor: rowBorderColor,
       borderWidth,
     });
-  }
-
-  function drawRowBorders(yTop: number, height: number) {
-    drawCellBorder(colX.rowNumber, yTop, colWidths.rowNumber, height);
-    drawCellBorder(colX.date, yTop, colWidths.date, height);
-    drawCellBorder(colX.expenseType, yTop, colWidths.expenseType, height);
-    drawCellBorder(colX.purpose, yTop, colWidths.purpose, height);
-    drawCellBorder(colX.amount, yTop, colWidths.amount, height);
   }
 
   function drawCenteredText(
@@ -715,6 +873,244 @@ async function createSummaryPage(
     }
   }
 
+  if (formType === "mileage-reimbursement") {
+    const colWidths = {
+      date: 90,
+      origin: 130,
+      destination: 130,
+      purpose: 120,
+      miles: 60,
+    };
+    const colX = {
+      date: margin,
+      origin: margin + colWidths.date + colGap,
+      destination: margin + colWidths.date + colWidths.origin + colGap * 2,
+      purpose:
+        margin +
+        colWidths.date +
+        colWidths.origin +
+        colWidths.destination +
+        colGap * 3,
+      miles:
+        margin +
+        colWidths.date +
+        colWidths.origin +
+        colWidths.destination +
+        colWidths.purpose +
+        colGap * 4,
+    };
+
+    function drawRowBorders(yTop: number, height: number) {
+      drawCellBorder(colX.date, yTop, colWidths.date, height);
+      drawCellBorder(colX.origin, yTop, colWidths.origin, height);
+      drawCellBorder(colX.destination, yTop, colWidths.destination, height);
+      drawCellBorder(colX.purpose, yTop, colWidths.purpose, height);
+      drawCellBorder(colX.miles, yTop, colWidths.miles, height);
+    }
+
+    const headerTopY = tableTopY;
+    drawRowBorders(headerTopY, baseRowHeight);
+
+    drawCenteredText(
+      "Date",
+      colX.date,
+      headerTopY,
+      colWidths.date,
+      boldFont,
+      fontSize
+    );
+    drawCenteredText(
+      "Origin Address",
+      colX.origin,
+      headerTopY,
+      colWidths.origin,
+      boldFont,
+      fontSize
+    );
+    drawCenteredText(
+      "Destination Address",
+      colX.destination,
+      headerTopY,
+      colWidths.destination,
+      boldFont,
+      fontSize
+    );
+    drawCenteredText(
+      "Purpose",
+      colX.purpose,
+      headerTopY,
+      colWidths.purpose,
+      boldFont,
+      fontSize
+    );
+    drawCenteredText(
+      "Miles",
+      colX.miles,
+      headerTopY,
+      colWidths.miles,
+      boldFont,
+      fontSize
+    );
+
+    let currentTopY = headerTopY - baseRowHeight;
+
+    for (const row of subformRows as MileageRow[]) {
+      const dateStr = formatDateForTable(row.date);
+      const originAddress = buildAddress([
+        coerceZohoFieldText(row.originStreet),
+        coerceZohoFieldText(row.originCity),
+        coerceZohoFieldText(row.originState),
+        coerceZohoFieldText(row.originZip),
+      ]);
+      const destinationAddress = buildAddress([
+        coerceZohoFieldText(row.destinationStreet),
+        coerceZohoFieldText(row.destinationCity),
+        coerceZohoFieldText(row.destinationState),
+        coerceZohoFieldText(row.destinationZip),
+      ]);
+      const purposeStr = coerceZohoFieldText(row.purpose) || "";
+      const milesStr = formatMilesValue(row.numberOfMiles);
+
+      const truncate = (text: string, maxWidth: number) => {
+        const width = font.widthOfTextAtSize(text, fontSize);
+        if (width <= maxWidth) return text;
+        let truncated = text;
+        while (font.widthOfTextAtSize(truncated + "...", fontSize) > maxWidth) {
+          truncated = truncated.slice(0, -1);
+        }
+        return truncated + "...";
+      };
+
+      const dateLines = wrapText(dateStr, colWidths.date);
+      const originLines = wrapText(originAddress, colWidths.origin);
+      const destinationLines = wrapText(
+        destinationAddress,
+        colWidths.destination
+      );
+      const purposeLines = wrapText(
+        truncate(purposeStr, colWidths.purpose),
+        colWidths.purpose
+      );
+      const milesLines = wrapText(milesStr, colWidths.miles);
+
+      const maxLines = Math.max(
+        dateLines.length,
+        originLines.length,
+        destinationLines.length,
+        purposeLines.length,
+        milesLines.length
+      );
+      const rowHeight = Math.max(baseRowHeight, maxLines * cellLineHeight + 6);
+
+      const rowTopY = currentTopY;
+      drawRowBorders(rowTopY, rowHeight);
+
+      drawCenteredLines(
+        dateLines,
+        colX.date,
+        rowTopY,
+        colWidths.date,
+        font,
+        fontSize,
+        rowHeight
+      );
+      drawCenteredLines(
+        originLines,
+        colX.origin,
+        rowTopY,
+        colWidths.origin,
+        font,
+        fontSize,
+        rowHeight
+      );
+      drawCenteredLines(
+        destinationLines,
+        colX.destination,
+        rowTopY,
+        colWidths.destination,
+        font,
+        fontSize,
+        rowHeight
+      );
+      drawCenteredLines(
+        purposeLines,
+        colX.purpose,
+        rowTopY,
+        colWidths.purpose,
+        font,
+        fontSize,
+        rowHeight
+      );
+      drawCenteredLines(
+        milesLines,
+        colX.miles,
+        rowTopY,
+        colWidths.miles,
+        font,
+        fontSize,
+        rowHeight
+      );
+
+      currentTopY -= rowHeight;
+    }
+
+    const totalMiles = formatMilesValue(recordInfo.totalMiles) || "-";
+    const totalAmount =
+      recordInfo.totalMilesMultiplied != null
+        ? formatAmountForTable(recordInfo.totalMilesMultiplied)
+        : "-";
+    let totalY = currentTopY - lineHeight * 2;
+    page.drawText(`Total Miles: ${totalMiles}`, {
+      x: margin,
+      y: totalY,
+      size: boldFontSize,
+      font: boldFont,
+    });
+    totalY -= lineHeight + 2;
+    page.drawText(`Total Amount: ${totalAmount}`, {
+      x: margin,
+      y: totalY,
+      size: boldFontSize,
+      font: boldFont,
+    });
+
+    return;
+  }
+
+  const colWidths = {
+    rowNumber: 60,
+    date: 100,
+    expenseType: 120,
+    purpose: 160,
+    amount: 90,
+  };
+  const colX = {
+    rowNumber: margin,
+    date: margin + colWidths.rowNumber + colGap,
+    expenseType: margin + colWidths.rowNumber + colWidths.date + colGap * 2,
+    purpose:
+      margin +
+      colWidths.rowNumber +
+      colWidths.date +
+      colWidths.expenseType +
+      colGap * 3,
+    amount:
+      margin +
+      colWidths.rowNumber +
+      colWidths.date +
+      colWidths.expenseType +
+      colWidths.purpose +
+      colGap * 4,
+  };
+
+  function drawRowBorders(yTop: number, height: number) {
+    drawCellBorder(colX.rowNumber, yTop, colWidths.rowNumber, height);
+    drawCellBorder(colX.date, yTop, colWidths.date, height);
+    drawCellBorder(colX.expenseType, yTop, colWidths.expenseType, height);
+    drawCellBorder(colX.purpose, yTop, colWidths.purpose, height);
+    drawCellBorder(colX.amount, yTop, colWidths.amount, height);
+  }
+
   const headerTopY = tableTopY;
   drawRowBorders(headerTopY, baseRowHeight);
 
@@ -756,7 +1152,7 @@ async function createSummaryPage(
   let currentTopY = headerTopY - baseRowHeight;
   let totalAmount = 0;
 
-  for (const row of subformRows) {
+  for (const row of subformRows as ExpenseRow[]) {
     const dateStr = formatDateForTable(row.date);
     const expenseTypeStr = coerceZohoFieldText(row.expenseType) || "";
     const purposeStr = coerceZohoFieldText(row.purpose) || "";
@@ -867,7 +1263,8 @@ async function combinePDFsAndImages(
   pdfItems: PdfItem[],
   imageItems: ImageItem[],
   recordInfo: RecordInfo,
-  subformRows: ExpenseRow[]
+  subformRows: ExpenseRow[] | MileageRow[],
+  formType: FormType
 ): Promise<Buffer> {
   const mergedPdf = await PDFDocument.create();
   const headerFont = await mergedPdf.embedFont(StandardFonts.Helvetica);
@@ -877,7 +1274,7 @@ async function combinePDFsAndImages(
   const lineGap = 2;
 
   // Create summary page as the first page
-  await createSummaryPage(mergedPdf, recordInfo, subformRows);
+  await createSummaryPage(mergedPdf, recordInfo, subformRows, formType);
 
   function drawHeader(page: PDFPage, lines: string[], font: PDFFont) {
     if (!lines.length) return;

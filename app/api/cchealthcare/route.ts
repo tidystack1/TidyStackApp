@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-
 import nodemailer from "nodemailer";
-import { PDFDocument } from "pdf-lib";
+
+import { getStampliEmailForFacility } from "@/lib/facilityStampliEmails";
 
 type ZohoRecordDetails = { data?: Array<Record<string, unknown>> };
-type FileUploadRecord = Record<string, unknown>;
+
+type FormType =
+  | "expense-reimbursement"
+  | "petty-cash"
+  | "mileage-reimbursement";
+
+type RecordInfo = {
+  facility?: string;
+  employeeEmail?: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -14,17 +23,73 @@ function coerceString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function normalizeFiles(fileUploadValue: unknown): FileUploadRecord[] {
-  if (!fileUploadValue) return [];
-  if (Array.isArray(fileUploadValue)) return fileUploadValue.filter(isRecord);
-  return isRecord(fileUploadValue) ? [fileUploadValue] : [];
+function getRequestRecordId(body: Record<string, unknown>): string | undefined {
+  return (
+    coerceString(body.recordId) ??
+    coerceString(body.recordID) ??
+    coerceString(body.id)
+  );
+}
+
+function getRequestPassword(body: Record<string, unknown>): string | undefined {
+  return coerceString(body.password);
+}
+
+function normalizeReimbursementType(
+  value: string | undefined
+): FormType | null {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "expense reimbursement") return "expense-reimbursement";
+  if (normalized === "mileage reimbursement") return "mileage-reimbursement";
+  if (normalized === "petty cash") return "petty-cash";
+  return null;
+}
+
+function getRequestReimbursementType(
+  body: Record<string, unknown>
+): FormType | null {
+  const raw =
+    coerceString(body["Reimbursement type"]) ??
+    coerceString(body.reimbursementType) ??
+    coerceString(body.reimbursement_type);
+  return normalizeReimbursementType(raw);
+}
+
+function extractRecordInfo(
+  recordDetails: unknown,
+  formType: FormType
+): RecordInfo {
+  try {
+    const details = recordDetails as ZohoRecordDetails;
+    const record = details.data?.[0];
+    if (!record) return {};
+
+    const isPettyCash = formType === "petty-cash";
+
+    return {
+      facility: coerceString(record["Facility"]) ?? undefined,
+      employeeEmail: isPettyCash
+        ? coerceString(record["Requested_by_Email"]) ?? undefined
+        : coerceString(record["Employee_Email"]) ?? undefined,
+    };
+  } catch (error) {
+    console.error("[CCHEALTHCARE] Error extracting record info:", error);
+    return {};
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const recordId = body.id;
+    if (!isRecord(body)) {
+      return NextResponse.json(
+        { error: "Invalid request body" },
+        { status: 400 }
+      );
+    }
 
+    const recordId = getRequestRecordId(body);
     if (!recordId) {
       return NextResponse.json(
         { error: "Record ID is required" },
@@ -32,57 +97,96 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`Processing record ID: ${recordId}`);
+    const expectedPassword = process.env.CCHEALTHCARE_API_PASSWORD;
+    if (!expectedPassword) {
+      return NextResponse.json(
+        { error: "Missing CCHEALTHCARE_API_PASSWORD" },
+        { status: 500 }
+      );
+    }
 
-    // Step 1: Get the record details from Zoho CRM
+    const password = getRequestPassword(body);
+    if (password !== expectedPassword) {
+      return NextResponse.json(
+        { error: "incorrect password" },
+        { status: 401 }
+      );
+    }
+
+    const reimbursementType = getRequestReimbursementType(body);
+    if (!reimbursementType) {
+      return NextResponse.json(
+        { error: "invalid Reimbursement type" },
+        { status: 400 }
+      );
+    }
+
+    console.log(
+      `[CCHEALTHCARE] recordId=${recordId} formType=${reimbursementType}`
+    );
+
     const recordDetails = await getZohoRecord(recordId);
+    const recordInfo = extractRecordInfo(recordDetails, reimbursementType);
+    const facilityEmail =
+      getStampliEmailForFacility(recordInfo.facility) ??
+      "unknown facility email";
+    const requesterEmail =
+      recordInfo.employeeEmail ?? "unknown requester email";
 
-    // Step 2: Extract file uploads from Expense Reimbursement subform
-    const fileUploads = extractFileUploadsFromSubform(recordDetails);
-    console.log(`Found ${fileUploads.length} file uploads in subform`);
+    const testPdfUrl = new URL("/api/test-pdf", request.nextUrl.origin);
+    const pdfResponse = await fetch(testPdfUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ id: recordId, formType: reimbursementType }),
+    });
 
-    if (!fileUploads || fileUploads.length === 0) {
+    const pdfData = (await pdfResponse.json()) as {
+      pdfBase64?: string;
+      error?: string;
+    };
+
+    if (!pdfResponse.ok) {
       return NextResponse.json(
-        {
-          message: "No file uploads found in Expense Reimbursement subform",
-          recordId,
-        },
-        { status: 200 }
+        { error: pdfData.error || "Failed to build PDF attachment" },
+        { status: pdfResponse.status }
       );
     }
 
-    // Step 3: Download PDF and image files from subform
-    const { pdfBuffers, imageBuffers } = await downloadFileUploads(fileUploads);
-
-    if (pdfBuffers.length === 0 && imageBuffers.length === 0) {
+    if (!pdfData.pdfBase64) {
       return NextResponse.json(
-        {
-          message: "No PDF or image files found in subform uploads",
-          recordId,
-        },
-        { status: 200 }
+        { error: "Missing PDF attachment" },
+        { status: 500 }
       );
     }
 
-    // Step 4: Combine PDFs and images into one
-    const combinedPdf = await combinePDFsAndImages(pdfBuffers, imageBuffers);
+    const pdfBuffer = Buffer.from(pdfData.pdfBase64, "base64");
 
-    // Step 5: Send email with combined PDF
-    await sendEmail(combinedPdf, recordId);
+    await sendSubmittedEmail({
+      recordId,
+      facilityEmail,
+      reimbursementType,
+      pdfBuffer,
+    });
+
+    await sendRequesterEmail({
+      requesterEmail,
+      reimbursementType,
+    });
 
     return NextResponse.json(
       {
-        message: "Successfully processed and sent email",
+        message: "Successfully sent notifications",
         recordId,
-        attachmentCount: fileUploads.length,
-        pdfCount: pdfBuffers.length + imageBuffers.length,
-        pdfFiles: pdfBuffers.length,
-        imageFiles: imageBuffers.length,
+        reimbursementType,
+        facilityEmail,
+        requesterEmail,
       },
       { status: 200 }
     );
   } catch (error) {
-    console.error("Error processing webhook:", error);
+    console.error("[CCHEALTHCARE] Error processing webhook:", error);
     return NextResponse.json(
       {
         error: "Internal server error",
@@ -95,13 +199,11 @@ export async function POST(request: NextRequest) {
 
 async function getZohoRecord(recordId: string) {
   const accessToken = await getZohoAccessToken();
-
-  // Assuming the module is Staff_Forms based on the screenshot
-  // You can make this configurable via environment variable
   const zohoModule = process.env.ZOHO_MODULE || "Staff_Forms";
+  const apiDomain = process.env.ZOHO_API_DOMAIN || "www.zohoapis.com";
 
   const response = await fetch(
-    `https://www.zohoapis.com/crm/v2/${zohoModule}/${recordId}`,
+    `https://${apiDomain}/crm/v2/${zohoModule}/${recordId}`,
     {
       headers: {
         Authorization: `Zoho-oauthtoken ${accessToken}`,
@@ -110,216 +212,60 @@ async function getZohoRecord(recordId: string) {
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch record: ${response.statusText}`);
+    const errorText = await response.text();
+    throw new Error(`Failed to fetch record: ${response.status} ${errorText}`);
   }
 
-  const data = await response.json();
-  return data;
+  return response.json();
 }
 
-function extractFileUploadsFromSubform(
-  recordDetails: unknown
-): FileUploadRecord[] {
-  try {
-    const details = recordDetails as ZohoRecordDetails;
-    // Get the first record from the data array
-    const record = details.data?.[0];
-    if (!record) {
-      console.log("No record data found");
-      return [];
-    }
+async function sendSubmittedEmail({
+  recordId,
+  facilityEmail,
+  reimbursementType,
+  pdfBuffer,
+}: {
+  recordId: string;
+  facilityEmail: string;
+  reimbursementType: FormType;
+  pdfBuffer: Buffer;
+}) {
+  const transporter = createTransporter();
 
-    // Get the Subform_1 (Expense Reimbursement) field
-    const subformData = record.Subform_1;
-    if (!subformData || !Array.isArray(subformData)) {
-      console.log("No subform data found or it's not an array");
-      return [];
-    }
-
-    console.log(
-      `Found ${subformData.length} rows in Expense Reimbursement subform`
-    );
-
-    // Extract all file uploads from the subform rows
-    const fileUploads: FileUploadRecord[] = [];
-    subformData.forEach((row: unknown, index: number) => {
-      if (!isRecord(row)) return;
-      const files = normalizeFiles(row["File_Upload_1"]);
-      if (files.length > 0) {
-        console.log(`Row ${index + 1}: Found ${files.length} file upload(s)`);
-        fileUploads.push(...files);
-      } else {
-        console.log(`Row ${index + 1}: No file upload found`);
-      }
-    });
-
-    return fileUploads;
-  } catch (error) {
-    console.error("Error extracting file uploads from subform:", error);
-    return [];
-  }
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: "mspitzer@tidystack.com",
+    subject: `CCHealthcare ${humanizeFormType(reimbursementType)} submitted`,
+    text: `a form was submitted, in real this would go to the stampli email address: ${facilityEmail}`,
+    attachments: [
+      {
+        filename: `combined-${recordId}.pdf`,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+  });
 }
 
-async function downloadFileUploads(fileUploads: FileUploadRecord[]) {
-  const accessToken = await getZohoAccessToken();
-  const pdfBuffers: Buffer[] = [];
-  const imageBuffers: Array<{
-    buffer: Buffer;
-    type: "jpeg" | "png";
-    fileName: string;
-  }> = [];
+async function sendRequesterEmail({
+  requesterEmail,
+  reimbursementType,
+}: {
+  requesterEmail: string;
+  reimbursementType: FormType;
+}) {
+  const transporter = createTransporter();
 
-  for (let i = 0; i < fileUploads.length; i++) {
-    const file = fileUploads[i];
-
-    // File object structure in Zoho: { file_Id: "...", file_Name: "..." }
-    const fileId = coerceString(file["file_Id"]) ?? coerceString(file["id"]);
-    if (!fileId) {
-      console.log(`Skipping file without file_Id (index ${i})`);
-      continue;
-    }
-
-    const fileName = coerceString(file["file_Name"]) ?? `file_${i}`;
-    const lowerFileName = fileName.toLowerCase();
-
-    // Check if it's a PDF or supported image
-    const isPdf = lowerFileName.endsWith(".pdf");
-    const isJpeg =
-      lowerFileName.endsWith(".jpg") || lowerFileName.endsWith(".jpeg");
-    const isPng = lowerFileName.endsWith(".png");
-
-    if (!isPdf && !isJpeg && !isPng) {
-      console.log(`Skipping unsupported file: ${fileName}`);
-      continue;
-    }
-
-    const fileType = isPdf ? "PDF" : isJpeg ? "JPEG" : "PNG";
-
-    console.log(
-      `Downloading ${fileType} from subform: ${fileName} (ID: ${fileId})`
-    );
-
-    try {
-      // Download the file using the file_Id
-      const response = await fetch(
-        `https://content.zohoapis.com/crm/v2/files?id=${fileId}`,
-        {
-          headers: {
-            Authorization: `Zoho-oauthtoken ${accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        console.error(
-          `Failed to download file ${fileId}: ${response.statusText}`
-        );
-        continue;
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      if (isPdf) {
-        pdfBuffers.push(buffer);
-      } else if (isJpeg) {
-        imageBuffers.push({ buffer, type: "jpeg", fileName });
-      } else if (isPng) {
-        imageBuffers.push({ buffer, type: "png", fileName });
-      }
-
-      console.log(`Successfully downloaded: ${fileName}`);
-    } catch (error) {
-      console.error(`Error downloading file ${fileName}:`, error);
-      continue;
-    }
-  }
-
-  return { pdfBuffers, imageBuffers };
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: "mspitzer+requester@tidystack.com",
+    subject: `CCHealthcare ${humanizeFormType(reimbursementType)} received`,
+    text: `your reimbursement request was submitted Successfully, in real this would go to ${requesterEmail}`,
+  });
 }
 
-async function combinePDFsAndImages(
-  pdfBuffers: Buffer[],
-  imageBuffers: Array<{
-    buffer: Buffer;
-    type: "jpeg" | "png";
-    fileName: string;
-  }>
-): Promise<Buffer> {
-  const mergedPdf = await PDFDocument.create();
-
-  // Add all PDF pages
-  for (let i = 0; i < pdfBuffers.length; i++) {
-    try {
-      console.log(`Merging PDF ${i + 1}/${pdfBuffers.length}`);
-      const pdf = await PDFDocument.load(pdfBuffers[i]);
-      const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-      copiedPages.forEach((page) => mergedPdf.addPage(page));
-      console.log(`Added ${copiedPages.length} pages from PDF ${i + 1}`);
-    } catch (error) {
-      console.error(`Error merging PDF ${i + 1}:`, error);
-      // Continue with other PDFs even if one fails
-    }
-  }
-
-  // Convert images to PDF pages
-  for (let i = 0; i < imageBuffers.length; i++) {
-    try {
-      const { buffer, type, fileName } = imageBuffers[i];
-      console.log(`Converting image to PDF page: ${fileName}`);
-
-      // Embed the image
-      const image =
-        type === "jpeg"
-          ? await mergedPdf.embedJpg(buffer)
-          : await mergedPdf.embedPng(buffer);
-
-      // Calculate page size to fit image (max Letter size: 612x792 points)
-      const maxWidth = 612;
-      const maxHeight = 792;
-      let { width, height } = image;
-
-      // Scale down if image is too large
-      if (width > maxWidth || height > maxHeight) {
-        const widthRatio = maxWidth / width;
-        const heightRatio = maxHeight / height;
-        const ratio = Math.min(widthRatio, heightRatio);
-        width = width * ratio;
-        height = height * ratio;
-      }
-
-      // Create page with calculated dimensions
-      const page = mergedPdf.addPage([width, height]);
-
-      // Draw image to fill the entire page
-      page.drawImage(image, {
-        x: 0,
-        y: 0,
-        width: width,
-        height: height,
-      });
-
-      console.log(
-        `Added image page: ${fileName} (${Math.round(width)}x${Math.round(
-          height
-        )})`
-      );
-    } catch (error) {
-      console.error(
-        `Error converting image ${imageBuffers[i].fileName}:`,
-        error
-      );
-      // Continue with other images even if one fails
-    }
-  }
-
-  const mergedPdfBytes = await mergedPdf.save();
-  console.log(`Final combined PDF size: ${mergedPdfBytes.length} bytes`);
-  return Buffer.from(mergedPdfBytes);
-}
-
-async function sendEmail(pdfBuffer: Buffer, recordId: string) {
-  const transporter = nodemailer.createTransport({
+function createTransporter() {
+  return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT || "587"),
     secure: process.env.SMTP_SECURE === "true",
@@ -328,38 +274,32 @@ async function sendEmail(pdfBuffer: Buffer, recordId: string) {
       pass: process.env.SMTP_PASS,
     },
   });
+}
 
-  const mailOptions = {
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to: "mspitzer@tidystack.com",
-    subject: `Combined PDF Attachments - Record ${recordId}`,
-    text: `Please find attached the combined PDF document from Zoho CRM record ${recordId}.`,
-    html: `<p>Please find attached the combined PDF document from Zoho CRM record <strong>${recordId}</strong>.</p>`,
-    attachments: [
-      {
-        filename: `combined-${recordId}.pdf`,
-        content: pdfBuffer,
-        contentType: "application/pdf",
-      },
-    ],
-  };
-
-  await transporter.sendMail(mailOptions);
-  console.log(`Email sent successfully for record ${recordId}`);
+function humanizeFormType(formType: FormType) {
+  switch (formType) {
+    case "expense-reimbursement":
+      return "Expense Reimbursement";
+    case "mileage-reimbursement":
+      return "Mileage Reimbursement";
+    case "petty-cash":
+      return "Petty Cash";
+  }
 }
 
 // Token management for Zoho OAuth
 let cachedAccessToken: { token: string; expiresAt: number } | null = null;
 
 async function getZohoAccessToken(): Promise<string> {
-  // Check if we have a valid cached token
   if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now()) {
     return cachedAccessToken.token;
   }
 
-  // Get new access token using refresh token
+  const accountsDomain =
+    process.env.ZOHO_ACCOUNTS_DOMAIN || "accounts.zoho.com";
+
   const response = await fetch(
-    `https://accounts.zoho.com/oauth/v2/token?` +
+    `https://${accountsDomain}/oauth/v2/token?` +
       `refresh_token=${process.env.ZOHO_REFRESH_TOKEN}&` +
       `client_id=${process.env.ZOHO_CLIENT_ID}&` +
       `client_secret=${process.env.ZOHO_CLIENT_SECRET}&` +
@@ -375,7 +315,6 @@ async function getZohoAccessToken(): Promise<string> {
 
   const data = await response.json();
 
-  // Cache the token (expires in 1 hour, we'll refresh 5 minutes early)
   cachedAccessToken = {
     token: data.access_token,
     expiresAt: Date.now() + (data.expires_in - 300) * 1000,
