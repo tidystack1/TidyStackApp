@@ -6,9 +6,9 @@ type SmartSuiteCreateResponse = {
 };
 
 const SMARTSUITE_REIMBURSEMENT_FOR: Record<FormType, string> = {
-  "expense-reimbursement": "mYQp",
-  "mileage-reimbursement": "rTe10",
-  "petty-cash": "ZUgYX",
+  "expense-reimbursement": "Expense Reimbursement",
+  "mileage-reimbursement": "Mileage Reimbursement",
+  "petty-cash": "Petty Cash",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -75,8 +75,7 @@ function buildSmartSuitePayload(
     const record = details.data?.[0];
     if (!record) {
       return {
-        title: "Unknown Facility",
-        sb4ac83812: SMARTSUITE_REIMBURSEMENT_FOR[formType],
+        s99efbed72: SMARTSUITE_REIMBURSEMENT_FOR[formType],
       };
     }
 
@@ -95,32 +94,36 @@ function buildSmartSuitePayload(
     const requesterName = buildFullName(requesterFirst, requesterLast);
 
     const payload: Record<string, unknown> = {
-      title: facility ?? "Unknown Facility",
-      sb4ac83812: SMARTSUITE_REIMBURSEMENT_FOR[formType],
+      s99efbed72: SMARTSUITE_REIMBURSEMENT_FOR[formType],
     };
 
-    if (employeeName) {
-      payload.s357536aaf = employeeName;
+    if (facility) {
+      payload.sb5b06f6f2 = facility;
     }
 
-    if (employeeEmail) {
-      payload.s0df5a9f6c = [employeeEmail];
-    }
+    if (formType === "petty-cash") {
+      if (requesterName) {
+        payload.sf2bbc6208 = requesterName;
+      }
 
-    if (requesterName || employeeName) {
-      payload.sf2bbc6208 = requesterName ?? employeeName;
-    }
+      if (requesterEmail) {
+        payload.s22ba4c7b9 = [requesterEmail];
+      }
+    } else {
+      if (employeeName) {
+        payload.s357536aaf = employeeName;
+      }
 
-    if (requesterEmail || employeeEmail) {
-      payload.s22ba4c7b9 = [requesterEmail ?? employeeEmail];
+      if (employeeEmail) {
+        payload.s0df5a9f6c = [employeeEmail];
+      }
     }
 
     return payload;
   } catch (error) {
     console.error("[CCHEALTHCARE] Error building SmartSuite payload:", error);
     return {
-      title: "Unknown Facility",
-      sb4ac83812: SMARTSUITE_REIMBURSEMENT_FOR[formType],
+      s99efbed72: SMARTSUITE_REIMBURSEMENT_FOR[formType],
     };
   }
 }
