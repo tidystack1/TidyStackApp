@@ -3,6 +3,7 @@ import nodemailer from "nodemailer";
 
 import { getStampliEmailForFacility } from "@/lib/facilityStampliEmails";
 import { buildReimbursementPdf, type FormType } from "./pdf";
+import { createSmartSuiteRecord } from "./smartsuite";
 import { getZohoRecord, type ZohoRecordDetails } from "./zoho";
 
 type RecordInfo = {
@@ -116,10 +117,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(
-      `[CCHEALTHCARE] recordId=${recordId} formType=${reimbursementType}`
-    );
-
     const recordDetails = await getZohoRecord(recordId);
     const recordInfo = extractRecordInfo(recordDetails, reimbursementType);
     const facilityEmail =
@@ -145,6 +142,11 @@ export async function POST(request: NextRequest) {
       reimbursementType,
     });
 
+    const smartSuiteRecord = await createSmartSuiteRecord(
+      recordDetails,
+      reimbursementType
+    );
+
     return NextResponse.json(
       {
         message: "Successfully sent notifications",
@@ -152,6 +154,7 @@ export async function POST(request: NextRequest) {
         reimbursementType,
         facilityEmail,
         requesterEmail,
+        smartSuiteRecordId: smartSuiteRecord?.id,
       },
       { status: 200 }
     );
