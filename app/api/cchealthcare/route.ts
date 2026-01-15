@@ -2,13 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 
 import { getStampliEmailForFacility } from "@/lib/facilityStampliEmails";
-
-type ZohoRecordDetails = { data?: Array<Record<string, unknown>> };
-
-type FormType =
-  | "expense-reimbursement"
-  | "petty-cash"
-  | "mileage-reimbursement";
+import { buildReimbursementPdf, type FormType } from "./pdf";
+import { getZohoRecord, type ZohoRecordDetails } from "./zoho";
 
 type RecordInfo = {
   facility?: string;
@@ -133,35 +128,10 @@ export async function POST(request: NextRequest) {
     const requesterEmail =
       recordInfo.employeeEmail ?? "unknown requester email";
 
-    const testPdfUrl = new URL("/api/test-pdf", request.nextUrl.origin);
-    const pdfResponse = await fetch(testPdfUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ id: recordId, formType: reimbursementType }),
-    });
-
-    const pdfData = (await pdfResponse.json()) as {
-      pdfBase64?: string;
-      error?: string;
-    };
-
-    if (!pdfResponse.ok) {
-      return NextResponse.json(
-        { error: pdfData.error || "Failed to build PDF attachment" },
-        { status: pdfResponse.status }
-      );
-    }
-
-    if (!pdfData.pdfBase64) {
-      return NextResponse.json(
-        { error: "Missing PDF attachment" },
-        { status: 500 }
-      );
-    }
-
-    const pdfBuffer = Buffer.from(pdfData.pdfBase64, "base64");
+    const pdfBuffer = await buildReimbursementPdf(
+      recordDetails,
+      reimbursementType
+    );
 
     await sendSubmittedEmail({
       recordId,
@@ -195,28 +165,6 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-async function getZohoRecord(recordId: string) {
-  const accessToken = await getZohoAccessToken();
-  const zohoModule = process.env.ZOHO_MODULE || "Staff_Forms";
-  const apiDomain = process.env.ZOHO_API_DOMAIN || "www.zohoapis.com";
-
-  const response = await fetch(
-    `https://${apiDomain}/crm/v2/${zohoModule}/${recordId}`,
-    {
-      headers: {
-        Authorization: `Zoho-oauthtoken ${accessToken}`,
-      },
-    }
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to fetch record: ${response.status} ${errorText}`);
-  }
-
-  return response.json();
 }
 
 async function sendSubmittedEmail({
@@ -285,40 +233,4 @@ function humanizeFormType(formType: FormType) {
     case "petty-cash":
       return "Petty Cash";
   }
-}
-
-// Token management for Zoho OAuth
-let cachedAccessToken: { token: string; expiresAt: number } | null = null;
-
-async function getZohoAccessToken(): Promise<string> {
-  if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now()) {
-    return cachedAccessToken.token;
-  }
-
-  const accountsDomain =
-    process.env.ZOHO_ACCOUNTS_DOMAIN || "accounts.zoho.com";
-
-  const response = await fetch(
-    `https://${accountsDomain}/oauth/v2/token?` +
-      `refresh_token=${process.env.ZOHO_REFRESH_TOKEN}&` +
-      `client_id=${process.env.ZOHO_CLIENT_ID}&` +
-      `client_secret=${process.env.ZOHO_CLIENT_SECRET}&` +
-      `grant_type=refresh_token`,
-    {
-      method: "POST",
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to get access token: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-
-  cachedAccessToken = {
-    token: data.access_token,
-    expiresAt: Date.now() + (data.expires_in - 300) * 1000,
-  };
-
-  return data.access_token;
 }
