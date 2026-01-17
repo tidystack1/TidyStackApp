@@ -188,7 +188,7 @@ async function sendSubmittedEmail({
   pdfBuffer: Buffer;
 }) {
   const transporter = createTransporter();
-
+// in testing mode it will be sent to mspitzer@tidystack.com otherwise facilityEmail
   await transporter.sendMail({
     from: process.env.SMTP_FROM || process.env.SMTP_USER,
     to: facilityEmail,
@@ -212,7 +212,7 @@ async function sendRequesterEmail({
   reimbursementType: FormType;
 }) {
   const transporter = createTransporter();
-
+// in testing mode it will be sent to mspitzer@tidystack.com otherwise requesterEmail
   await transporter.sendMail({
     from: process.env.SMTP_FROM || process.env.SMTP_USER,
     to: requesterEmail,

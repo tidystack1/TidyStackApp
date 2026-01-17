@@ -11,12 +11,20 @@ type SmartSuiteAttachment = {
   data: Buffer;
 };
 
-const SMARTSUITE_ATTACHMENT_FIELD_ID = "s1d6347da1";
+type SmartSuiteEmployeeListResponse = {
+  items?: Array<{ id?: string }>;
+  total?: number;
+};
 
+const SMARTSUITE_ATTACHMENT_FIELD_ID = "s1d6347da1";
+const SMARTSUITE_EMPLOYEE_TABLE_ID = "69695887db422e6eb4cea61c";
+const SMARTSUITE_EMPLOYEE_EMAIL_FIELD_ID = "s13b288a1b";
+const SMARTSUITE_EMPLOYEE_LINK_FIELD_ID = "sf7d6cba84";
+const SMARTSUITE_REIMBURSEMENT_FOR_FIELD_ID = "sc765b0e18";
 const SMARTSUITE_REIMBURSEMENT_FOR: Record<FormType, string> = {
-  "expense-reimbursement": "Expense Reimbursement",
-  "mileage-reimbursement": "Mileage Reimbursement",
-  "petty-cash": "Petty Cash",
+  "expense-reimbursement": "DnSFf",
+  "mileage-reimbursement": "mKTXD",
+  "petty-cash": "ZH8L3",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,7 +91,8 @@ function buildSmartSuitePayload(
     const record = details.data?.[0];
     if (!record) {
       return {
-        s99efbed72: SMARTSUITE_REIMBURSEMENT_FOR[formType],
+        [SMARTSUITE_REIMBURSEMENT_FOR_FIELD_ID]:
+          SMARTSUITE_REIMBURSEMENT_FOR[formType],
       };
     }
 
@@ -102,7 +111,8 @@ function buildSmartSuitePayload(
     const requesterName = buildFullName(requesterFirst, requesterLast);
 
     const payload: Record<string, unknown> = {
-      s99efbed72: SMARTSUITE_REIMBURSEMENT_FOR[formType],
+      [SMARTSUITE_REIMBURSEMENT_FOR_FIELD_ID]:
+        SMARTSUITE_REIMBURSEMENT_FOR[formType],
     };
 
     if (facility) {
@@ -131,9 +141,148 @@ function buildSmartSuitePayload(
   } catch (error) {
     console.error("[CCHEALTHCARE] Error building SmartSuite payload:", error);
     return {
-      s99efbed72: SMARTSUITE_REIMBURSEMENT_FOR[formType],
+      [SMARTSUITE_REIMBURSEMENT_FOR_FIELD_ID]:
+        SMARTSUITE_REIMBURSEMENT_FOR[formType],
     };
   }
+}
+
+function getEmployeeInfo(
+  recordDetails: unknown,
+  formType: FormType
+): { name?: string; email?: string } {
+  try {
+    const details = recordDetails as ZohoRecordDetails;
+    const record = details.data?.[0];
+    if (!record) return {};
+
+    const employeeFirst = coerceZohoFieldText(record["Employee"]);
+    const employeeLast = coerceZohoFieldText(record["Employee_Last_Name"]);
+    const employeeEmail = coerceZohoFieldText(record["Employee_Email"]);
+
+    const requesterFirst = coerceZohoFieldText(
+      record["Requested_by_First_Name"]
+    );
+    const requesterLast = coerceZohoFieldText(record["Requested_by_Last_Name"]);
+    const requesterEmail = coerceZohoFieldText(record["Requested_by_Email"]);
+
+    const employeeName = buildFullName(employeeFirst, employeeLast);
+    const requesterName = buildFullName(requesterFirst, requesterLast);
+
+    if (formType === "petty-cash") {
+      return {
+        name: requesterName ?? employeeName,
+        email: requesterEmail ?? employeeEmail,
+      };
+    }
+
+    return { name: employeeName, email: employeeEmail };
+  } catch (error) {
+    console.error("[CCHEALTHCARE] Error reading employee info:", error);
+    return {};
+  }
+}
+
+async function findEmployeeIdByEmail({
+  apiKey,
+  accountId,
+  email,
+}: {
+  apiKey: string;
+  accountId: string;
+  email: string;
+}): Promise<string | undefined> {
+  const response = await fetch(
+    `https://app.smartsuite.com/api/v1/applications/${SMARTSUITE_EMPLOYEE_TABLE_ID}/records/list/?offset=0&limit=1`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        "ACCOUNT-ID": accountId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        sort: [],
+        filter: {
+         
+            operator: "and",
+            fields: [
+              {
+                comparison: "is",
+                field: SMARTSUITE_EMPLOYEE_EMAIL_FIELD_ID,
+                value: email,
+              },
+            ],
+          
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `SmartSuite employee lookup failed: ${response.status} ${errorText}`
+    );
+  }
+
+  const data = (await response.json()) as SmartSuiteEmployeeListResponse;
+  return data.items?.[0]?.id;
+}
+
+async function createEmployeeRecord({
+  apiKey,
+  accountId,
+  name,
+  email,
+}: {
+  apiKey: string;
+  accountId: string;
+  name?: string;
+  email: string;
+}): Promise<string | undefined> {
+  const response = await fetch(
+    `https://app.smartsuite.com/api/v1/applications/${SMARTSUITE_EMPLOYEE_TABLE_ID}/records/`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        "ACCOUNT-ID": accountId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title: name ?? email,
+        [SMARTSUITE_EMPLOYEE_EMAIL_FIELD_ID]: email,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `SmartSuite employee create failed: ${response.status} ${errorText}`
+    );
+  }
+
+  const record = (await response.json()) as SmartSuiteCreateResponse;
+  return record?.id;
+}
+
+async function getOrCreateEmployeeId({
+  apiKey,
+  accountId,
+  name,
+  email,
+}: {
+  apiKey: string;
+  accountId: string;
+  name?: string;
+  email?: string;
+}): Promise<string | undefined> {
+  if (!email) return undefined;
+  const existingId = await findEmployeeIdByEmail({ apiKey, accountId, email });
+  if (existingId) return existingId;
+  return createEmployeeRecord({ apiKey, accountId, name, email });
 }
 
 export async function createSmartSuiteRecord(
@@ -143,6 +292,17 @@ export async function createSmartSuiteRecord(
 ): Promise<SmartSuiteCreateResponse> {
   const { apiKey, accountId, tableId } = getSmartSuiteConfig();
   const payload = buildSmartSuitePayload(recordDetails, formType);
+  const employeeInfo = getEmployeeInfo(recordDetails, formType);
+  const employeeId = await getOrCreateEmployeeId({
+    apiKey,
+    accountId,
+    name: employeeInfo.name,
+    email: employeeInfo.email,
+  });
+
+  if (employeeId) {
+    payload[SMARTSUITE_EMPLOYEE_LINK_FIELD_ID] = [employeeId];
+  }
 
   const response = await fetch(
     `https://app.smartsuite.com/api/v1/applications/${tableId}/records/`,
