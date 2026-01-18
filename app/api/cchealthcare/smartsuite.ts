@@ -1,3 +1,4 @@
+import { getSmartSuiteFacilityId } from "@/lib/facilityStampliEmails";
 import { type FormType } from "./pdf";
 import { type ZohoRecordDetails } from "./zoho";
 
@@ -20,6 +21,7 @@ const SMARTSUITE_ATTACHMENT_FIELD_ID = "s1d6347da1";
 const SMARTSUITE_EMPLOYEE_TABLE_ID = "69695887db422e6eb4cea61c";
 const SMARTSUITE_EMPLOYEE_EMAIL_FIELD_ID = "s13b288a1b";
 const SMARTSUITE_EMPLOYEE_LINK_FIELD_ID = "sf7d6cba84";
+const SMARTSUITE_FACILITY_FIELD_ID = "scd796824b";
 const SMARTSUITE_REIMBURSEMENT_FOR_FIELD_ID = "sc765b0e18";
 const SMARTSUITE_REIMBURSEMENT_FOR: Record<FormType, string> = {
   "expense-reimbursement": "DnSFf",
@@ -97,6 +99,7 @@ function buildSmartSuitePayload(
     }
 
     const facility = coerceZohoFieldText(record["Facility"]);
+    const facilitySmartSuiteId = getSmartSuiteFacilityId(facility);
     const employeeFirst = coerceZohoFieldText(record["Employee"]);
     const employeeLast = coerceZohoFieldText(record["Employee_Last_Name"]);
     const employeeEmail = coerceZohoFieldText(record["Employee_Email"]);
@@ -115,8 +118,8 @@ function buildSmartSuitePayload(
         SMARTSUITE_REIMBURSEMENT_FOR[formType],
     };
 
-    if (facility) {
-      payload.sb5b06f6f2 = facility;
+    if (facilitySmartSuiteId) {
+      payload[SMARTSUITE_FACILITY_FIELD_ID] = facilitySmartSuiteId;
     }
 
     if (formType === "petty-cash") {
