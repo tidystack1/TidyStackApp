@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
-import { PDFDocument, PDFPage, rgb } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
 
 interface DeliveryListRequest {
   id: string;
@@ -10,11 +10,11 @@ interface DeliveryListRequest {
 interface SmartSuiteRecord {
   id: string;
   title: string;
-  s019f88929?: string[][];
-  s01b42a1e2?: any[][];
+  s019f88929?: unknown[][];
+  s01b42a1e2?: unknown[][];
   sb4d52576b?: string;
   s611b4bf9c?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 interface SmartSuiteResponse {
@@ -173,7 +173,6 @@ async function generateDeliveryListPDF(
       contentWidth * 0.35,
       contentWidth * 0.35,
     ];
-    const headerHeight = 0;
     const rowHeight = 20;
 
     // Draw records
@@ -260,7 +259,7 @@ async function generateDeliveryListPDF(
   return Buffer.from(pdfBytes);
 }
 
-function extractItemValue(itemArray?: any[][]): string {
+function extractItemValue(itemArray?: unknown[][]): string {
   if (!itemArray || !Array.isArray(itemArray) || itemArray.length === 0) {
     return "";
   }
@@ -271,7 +270,12 @@ function extractItemValue(itemArray?: any[][]): string {
     if (Array.isArray(item)) {
       for (const element of item) {
         if (element && typeof element === "object" && "label" in element) {
-          labels.push(String(element.label));
+          const label = (element as { label?: unknown }).label;
+          if (typeof label === "string") {
+            labels.push(label);
+          } else if (label !== undefined) {
+            labels.push(String(label));
+          }
         }
       }
     }
@@ -280,7 +284,7 @@ function extractItemValue(itemArray?: any[][]): string {
   return labels.join(", ");
 }
 
-function extractLocationValue(locationArray?: any[][]): string {
+function extractLocationValue(locationArray?: unknown[][]): string {
   if (
     !locationArray ||
     !Array.isArray(locationArray) ||
@@ -295,8 +299,14 @@ function extractLocationValue(locationArray?: any[][]): string {
     firstLocation[0]
   ) {
     const loc = firstLocation[0];
-    if (typeof loc === "object" && loc.sys_root) {
-      return loc.sys_root;
+    if (loc && typeof loc === "object" && "sys_root" in loc) {
+      const sysRoot = (loc as { sys_root?: unknown }).sys_root;
+      if (typeof sysRoot === "string") {
+        return sysRoot;
+      }
+      if (sysRoot !== undefined) {
+        return String(sysRoot);
+      }
     }
   }
   return "";
@@ -402,7 +412,8 @@ async function uploadDeliveryListPDFToSmartSuite(
 
     // Now upload the new file
     const formData = new FormData();
-    const fileBlob = new Blob([pdfBuffer], {
+    const pdfBytes = new Uint8Array(pdfBuffer);
+    const fileBlob = new Blob([pdfBytes], {
       type: "application/pdf",
     });
     const filename = `delivery_list_${new Date().toISOString().split("T")[0]}.pdf`;
