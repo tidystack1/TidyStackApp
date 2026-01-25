@@ -256,7 +256,8 @@ async function generateDeliveryListPDF(
     });
   }
 
-  return pdfDoc.save();
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
 }
 
 function extractItemValue(itemArray?: any[][]): string {
