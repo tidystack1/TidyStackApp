@@ -182,7 +182,6 @@ async function generateDeliveryListPDF(
       const location = extractLocationValue(record.s01b42a1e2);
       const instructions = record.sb4d52576b || "";
 
-      // Calculate row height needed for wrapping text
       const itemLines = wrapText(item, columnWidths[0] - 10, 9);
       const locationLines = wrapText(location, columnWidths[1] - 10, 9);
       const instructionLines = wrapText(instructions, columnWidths[2] - 10, 9);
