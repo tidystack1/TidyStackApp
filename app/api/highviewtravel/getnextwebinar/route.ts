@@ -52,8 +52,16 @@ async function getUpcomingWebinars(token: string) {
 // POST handler
 export async function POST(req: NextRequest) {
   try {
-    // Optional: read webhook payload if you need it
-    // const body = await req.json();
+    // Validate password
+    const body = await req.json();
+    const password = body.password;
+
+    if (password !== process.env.HIGHVIEWTRAVEL_PASSWORD) {
+      return NextResponse.json(
+        { error: "Invalid password" },
+        { status: 401 },
+      );
+    }
 
     const token = await getZoomAccessToken();
     const webinars = await getUpcomingWebinars(token);
