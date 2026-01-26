@@ -86,10 +86,13 @@ export async function POST(req: NextRequest) {
       join_url: next.join_url || null,
       topic: next.topic || null,
       webinar_id: next.id,
-      is_today: new Date(next.start_time).toDateString() === now.toDateString(),
+      is_today:
+        new Date(next.start_time).toDateString() === now.toDateString() ? 1 : 0,
       is_tomorrow:
         new Date(next.start_time).toDateString() ===
-        new Date(now.getTime() + 24 * 60 * 60 * 1000).toDateString(),
+        new Date(now.getTime() + 24 * 60 * 60 * 1000).toDateString()
+          ? 1
+          : 0,
     });
   } catch (err: any) {
     console.error(err);
