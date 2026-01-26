@@ -49,8 +49,12 @@ export async function POST(request: NextRequest) {
 
     if (!records || records.items.length === 0) {
       return NextResponse.json(
-        { error: "No delivery records found for this package" },
-        { status: 404 },
+        {
+          message: "No delivery records found for this package",
+          recordCount: 0,
+          routeCount: 0,
+        },
+        { status: 200 },
       );
     }
 
@@ -61,10 +65,14 @@ export async function POST(request: NextRequest) {
     const pdfBuffer = await generateDeliveryListPDF(groupedByRoute);
 
     // Send email
-    await sendDeliveryListEmail(pdfBuffer);
+    // await sendDeliveryListEmail(pdfBuffer);
 
     // Upload PDF to SmartSuite record
     await uploadDeliveryListPDFToSmartSuite(pdfBuffer, id);
+
+    // Generate and upload labels PDF
+    const labelsPdfBuffer = await generateLabelsListPDF(records.items);
+    await uploadLabelsPDFToSmartSuite(labelsPdfBuffer, id);
 
     return NextResponse.json(
       {
@@ -163,7 +171,7 @@ async function generateDeliveryListPDF(
     let yPosition = height - margin;
 
     // Title
-    page.drawText(route, {
+    page.drawText(`Route ${route}`, {
       x: margin,
       y: yPosition,
       size: 24,
@@ -186,7 +194,7 @@ async function generateDeliveryListPDF(
     for (const record of records) {
       const item = extractItemValue(record.s019f88929);
       const location = extractLocationValue(record.s01b42a1e2);
-      const instructions = record.sb4d52576b || "";
+      const instructions = extractInstructionsValue(record.s3eaec935f);
       const customerId = extractCustomerIdsValue(record.s64a81a706);
 
       const itemLines = wrapText(item, columnWidths[0] - 10, 9);
@@ -260,7 +268,7 @@ async function generateDeliveryListPDF(
     }
 
     // Add total boxes text at the bottom
-    const totalText = `Total boxes for ${route}:     ${records.length} boxes`;
+    const totalText = `Total boxes for Route ${route}:     ${records.length} boxes`;
     page.drawText(totalText, {
       x: margin,
       y: Math.max(yPosition - 30, margin),
@@ -323,6 +331,28 @@ function extractLocationValue(locationArray?: unknown[][]): string {
         return String(sysRoot);
       }
     }
+  }
+  return "";
+}
+
+function extractInstructionsValue(instructionsArray?: unknown[][]): string {
+  if (
+    !instructionsArray ||
+    !Array.isArray(instructionsArray) ||
+    instructionsArray.length === 0
+  ) {
+    return "";
+  }
+  const firstInstructions = instructionsArray[0];
+  if (Array.isArray(firstInstructions) && firstInstructions.length > 0) {
+    const instruction = firstInstructions[0];
+    if (instruction === null || instruction === undefined) {
+      return "";
+    }
+    if (typeof instruction === "string") {
+      return instruction;
+    }
+    return String(instruction);
   }
   return "";
 }
@@ -422,6 +452,173 @@ async function sendDeliveryListEmail(pdfBuffer: Buffer): Promise<void> {
   };
 
   await transporter.sendMail(mailOptions);
+}
+
+async function generateLabelsListPDF(
+  records: SmartSuiteRecord[],
+): Promise<Buffer> {
+  const pdfDoc = await PDFDocument.create();
+
+  // Avery label sizing for A4 (2 across, 10 down)
+  // Each label: 4 inches wide x 1 inch tall
+  const labelWidth = 280; // points (slightly less for gaps)
+  const labelHeight = 70; // points (slightly less for gaps)
+  const gapX = 8; // horizontal gap between labels
+  const gapY = 5; // vertical gap between labels
+  const marginLeft = 8;
+  const marginTop = 8;
+  const labelsPerRow = 2;
+  const labelsPerColumn = 10;
+
+  const pageWidth = 595; // A4 width in points
+  const pageHeight = 842; // A4 height in points
+
+  let labelIndex = 0;
+  let page = pdfDoc.addPage([pageWidth, pageHeight]);
+
+  for (const record of records) {
+    // Calculate position on page
+    const rowIndex = Math.floor(labelIndex / labelsPerRow);
+    const colIndex = labelIndex % labelsPerRow;
+
+    // If we've filled the page, create a new one
+    if (rowIndex >= labelsPerColumn) {
+      page = pdfDoc.addPage([pageWidth, pageHeight]);
+      labelIndex = 0;
+    }
+
+    const recalculatedRowIndex = Math.floor(labelIndex / labelsPerRow);
+    const recalculatedColIndex = labelIndex % labelsPerRow;
+
+    const xPosition = marginLeft + recalculatedColIndex * (labelWidth + gapX);
+    const yPosition =
+      pageHeight -
+      marginTop -
+      (recalculatedRowIndex + 1) * (labelHeight + gapY);
+
+    // Draw label border
+    page.drawRectangle({
+      x: xPosition,
+      y: yPosition,
+      width: labelWidth,
+      height: labelHeight,
+      borderColor: rgb(0, 0, 0),
+      borderWidth: 0.5,
+    });
+
+    // Extract and draw item text - centered both horizontally and vertically
+    const itemText = extractItemValue(record.s019f88929);
+    const fontSize = 18;
+    const lines = wrapText(itemText, labelWidth - 10, fontSize);
+
+    const lineSpacing = fontSize + 2;
+    const totalTextHeight = lines.length * lineSpacing - 2;
+    const labelCenterY = yPosition + labelHeight / 2;
+    const startY = labelCenterY + totalTextHeight / 2 - fontSize / 2;
+
+    let textY = startY;
+
+    lines.forEach((line) => {
+      // For horizontal centering, we need to measure the text width
+      // pdf-lib doesn't have built-in text measurement, so we estimate
+      const estimatedLineWidth = line.length * (fontSize * 0.5);
+      const centeredX = xPosition + (labelWidth - estimatedLineWidth) / 2;
+
+      page.drawText(line, {
+        x: centeredX,
+        y: textY,
+        size: fontSize,
+        color: rgb(0, 0, 0),
+        maxWidth: labelWidth - 10,
+      });
+      textY -= lineSpacing;
+    });
+
+    labelIndex++;
+  }
+
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
+}
+
+async function uploadLabelsPDFToSmartSuite(
+  pdfBuffer: Buffer,
+  recordId: string,
+): Promise<void> {
+  const apiKey = process.env.TOMCHEI_SHABBOS_SMARTSUITE_API_KEY;
+  const accountId = process.env.TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID;
+
+  if (!apiKey || !accountId) {
+    console.error("[DELIVERY LIST] Missing SmartSuite credentials");
+    return;
+  }
+
+  const tableId = "6925b0fb90de6fdfbd33e096";
+  const fieldId = "s3b0b4fbc0";
+
+  try {
+    // Clear the existing file field by setting it to null
+    const clearResponse = await fetch(
+      `https://app.smartsuite.com/api/v1/applications/${tableId}/records/${recordId}/`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          "ACCOUNT-ID": accountId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          [fieldId]: null,
+        }),
+      },
+    );
+
+    if (!clearResponse.ok) {
+      console.warn(
+        `[DELIVERY LIST] Failed to clear existing labels file: ${clearResponse.status}`,
+      );
+    }
+
+    // Now upload the new file
+    const formData = new FormData();
+    const pdfBytes = new Uint8Array(pdfBuffer);
+    const fileBlob = new Blob([pdfBytes], {
+      type: "application/pdf",
+    });
+    const filename = `labels_${new Date().toISOString().split("T")[0]}.pdf`;
+
+    formData.append("files", fileBlob, filename);
+    formData.append("filename", filename);
+
+    const uploadResponse = await fetch(
+      `https://app.smartsuite.com/api/v1/recordfiles/${tableId}/${recordId}/${fieldId}/`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          "ACCOUNT-ID": accountId,
+        },
+        body: formData,
+      },
+    );
+
+    if (!uploadResponse.ok) {
+      const errorText = await uploadResponse.text();
+      console.error(
+        `[DELIVERY LIST] Labels upload failed: ${uploadResponse.status} ${errorText}`,
+      );
+      return;
+    }
+
+    console.log(
+      "[DELIVERY LIST] Labels PDF uploaded to SmartSuite successfully",
+    );
+  } catch (error) {
+    console.error(
+      "[DELIVERY LIST] Error uploading labels PDF to SmartSuite:",
+      error,
+    );
+  }
 }
 
 async function uploadDeliveryListPDFToSmartSuite(
