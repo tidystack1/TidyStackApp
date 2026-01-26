@@ -57,10 +57,7 @@ export async function POST(req: NextRequest) {
     const password = body.password;
 
     if (password !== process.env.HIGHVIEWTRAVEL_PASSWORD) {
-      return NextResponse.json(
-        { error: "Invalid password" },
-        { status: 401 },
-      );
+      return NextResponse.json({ error: "Invalid password" }, { status: 401 });
     }
 
     const token = await getZoomAccessToken();
