@@ -14,6 +14,7 @@ interface SmartSuiteRecord {
   s01b42a1e2?: unknown[][];
   sb4d52576b?: string;
   s611b4bf9c?: string;
+  s64a81a706?: unknown[][];
   [key: string]: unknown;
 }
 
@@ -110,6 +111,11 @@ async function fetchSmartSuiteRecords(
             comparison: "contains",
             value: packageId,
           },
+          {
+            field: "sf44659fe6",
+            comparison: "is",
+            value: "0Nnwo",
+          },
         ],
       },
       hydrated: true,
@@ -169,9 +175,10 @@ async function generateDeliveryListPDF(
 
     // Table headers
     const columnWidths = [
+      contentWidth * 0.28,
       contentWidth * 0.3,
-      contentWidth * 0.35,
-      contentWidth * 0.35,
+      contentWidth * 0.32,
+      contentWidth * 0.1,
     ];
     const rowHeight = 20;
 
@@ -180,15 +187,18 @@ async function generateDeliveryListPDF(
       const item = extractItemValue(record.s019f88929);
       const location = extractLocationValue(record.s01b42a1e2);
       const instructions = record.sb4d52576b || "";
+      const customerId = extractCustomerIdsValue(record.s64a81a706);
 
       const itemLines = wrapText(item, columnWidths[0] - 10, 9);
       const locationLines = wrapText(location, columnWidths[1] - 10, 9);
       const instructionLines = wrapText(instructions, columnWidths[2] - 10, 9);
+      const customerIdLines = wrapText(customerId, columnWidths[3] - 10, 9);
 
       const maxLines = Math.max(
         itemLines.length,
         locationLines.length,
         instructionLines.length,
+        customerIdLines.length,
       );
       const currentRowHeight = Math.max(rowHeight, maxLines * 12 + 4);
 
@@ -211,7 +221,12 @@ async function generateDeliveryListPDF(
 
       // Draw column dividers and text
       let columnX = margin;
-      const columnTexts = [itemLines, locationLines, instructionLines];
+      const columnTexts = [
+        itemLines,
+        locationLines,
+        instructionLines,
+        customerIdLines,
+      ];
 
       columnTexts.forEach((lines, columnIndex) => {
         let textY = yPosition - 15;
@@ -245,7 +260,7 @@ async function generateDeliveryListPDF(
     }
 
     // Add total boxes text at the bottom
-    const totalText = `Total boxes for ${route}       ${records.length} boxes`;
+    const totalText = `Total boxes for ${route}:     ${records.length} boxes`;
     page.drawText(totalText, {
       x: margin,
       y: Math.max(yPosition - 30, margin),
@@ -310,6 +325,43 @@ function extractLocationValue(locationArray?: unknown[][]): string {
     }
   }
   return "";
+}
+
+function extractCustomerIdsValue(customerIdsArray?: unknown[][]): string {
+  if (
+    !customerIdsArray ||
+    !Array.isArray(customerIdsArray) ||
+    customerIdsArray.length === 0
+  ) {
+    return "";
+  }
+
+  const values: string[] = [];
+
+  for (const item of customerIdsArray) {
+    if (Array.isArray(item)) {
+      for (const element of item) {
+        if (element !== null && element !== undefined) {
+          if (typeof element === "string") {
+            values.push(element);
+          } else if (typeof element === "number") {
+            values.push(String(element));
+          } else if (typeof element === "object" && "label" in element) {
+            const label = (element as { label?: unknown }).label;
+            if (typeof label === "string") {
+              values.push(label);
+            } else if (label !== undefined) {
+              values.push(String(label));
+            }
+          } else {
+            values.push(String(element));
+          }
+        }
+      }
+    }
+  }
+
+  return values.join(", ");
 }
 
 function wrapText(text: string, maxWidth: number, fontSize: number): string[] {
