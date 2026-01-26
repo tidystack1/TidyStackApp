@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { PDFDocument, rgb } from "pdf-lib";
 
+// SmartSuite Configuration
+const SMARTSUITE_API_KEY = process.env.TOMCHEI_SHABBOS_SMARTSUITE_API_KEY;
+const SMARTSUITE_ACCOUNT_ID = process.env.TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID;
+const SMARTSUITE_RECORDS_TABLE_ID = "6925af29a4002f833ea5a0e8";
+const SMARTSUITE_DELIVERY_TABLE_ID = "6925b0fb90de6fdfbd33e096";
+const SMARTSUITE_DELIVERY_LIST_FIELD_ID = "sb1a7b32b6";
+const SMARTSUITE_LABELS_FIELD_ID = "s3b0b4fbc0";
+
 interface DeliveryListRequest {
   id: string;
   password: string;
@@ -12,6 +20,7 @@ interface SmartSuiteRecord {
   title: string;
   s019f88929?: unknown[][];
   s01b42a1e2?: unknown[][];
+  s3eaec935f?: unknown[][];
   sb4d52576b?: string;
   s611b4bf9c?: string;
   s64a81a706?: unknown[][];
@@ -97,17 +106,14 @@ export async function POST(request: NextRequest) {
 async function fetchSmartSuiteRecords(
   packageId: string,
 ): Promise<SmartSuiteResponse> {
-  const apiKey = process.env.TOMCHEI_SHABBOS_SMARTSUITE_API_KEY;
-  const accountId = process.env.TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID;
-
   const url =
     "https://app.smartsuite.com/api/v1/applications/6925af29a4002f833ea5a0e8/records/list/";
 
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Token ${apiKey}`,
-      "ACCOUNT-ID": accountId || "",
+      Authorization: `Token ${SMARTSUITE_API_KEY}`,
+      "ACCOUNT-ID": SMARTSUITE_ACCOUNT_ID || "",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -545,41 +551,13 @@ async function uploadLabelsPDFToSmartSuite(
   pdfBuffer: Buffer,
   recordId: string,
 ): Promise<void> {
-  const apiKey = process.env.TOMCHEI_SHABBOS_SMARTSUITE_API_KEY;
-  const accountId = process.env.TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID;
-
-  if (!apiKey || !accountId) {
+  if (!SMARTSUITE_API_KEY || !SMARTSUITE_ACCOUNT_ID) {
     console.error("[DELIVERY LIST] Missing SmartSuite credentials");
     return;
   }
 
-  const tableId = "6925b0fb90de6fdfbd33e096";
-  const fieldId = "s3b0b4fbc0";
-
   try {
-    // Clear the existing file field by setting it to null
-    const clearResponse = await fetch(
-      `https://app.smartsuite.com/api/v1/applications/${tableId}/records/${recordId}/`,
-      {
-        method: "PATCH",
-        headers: {
-          Authorization: `Token ${apiKey}`,
-          "ACCOUNT-ID": accountId,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          [fieldId]: null,
-        }),
-      },
-    );
-
-    if (!clearResponse.ok) {
-      console.warn(
-        `[DELIVERY LIST] Failed to clear existing labels file: ${clearResponse.status}`,
-      );
-    }
-
-    // Now upload the new file
+    // Upload the labels PDF to the same field as delivery list (don't clear to keep both files)
     const formData = new FormData();
     const pdfBytes = new Uint8Array(pdfBuffer);
     const fileBlob = new Blob([pdfBytes], {
@@ -591,12 +569,12 @@ async function uploadLabelsPDFToSmartSuite(
     formData.append("filename", filename);
 
     const uploadResponse = await fetch(
-      `https://app.smartsuite.com/api/v1/recordfiles/${tableId}/${recordId}/${fieldId}/`,
+      `https://app.smartsuite.com/api/v1/recordfiles/${SMARTSUITE_DELIVERY_TABLE_ID}/${recordId}/${SMARTSUITE_DELIVERY_LIST_FIELD_ID}/`,
       {
         method: "POST",
         headers: {
-          Authorization: `Token ${apiKey}`,
-          "ACCOUNT-ID": accountId,
+          Authorization: `Token ${SMARTSUITE_API_KEY}`,
+          "ACCOUNT-ID": SMARTSUITE_ACCOUNT_ID,
         },
         body: formData,
       },
@@ -625,30 +603,24 @@ async function uploadDeliveryListPDFToSmartSuite(
   pdfBuffer: Buffer,
   recordId: string,
 ): Promise<void> {
-  const apiKey = process.env.TOMCHEI_SHABBOS_SMARTSUITE_API_KEY;
-  const accountId = process.env.TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID;
-
-  if (!apiKey || !accountId) {
+  if (!SMARTSUITE_API_KEY || !SMARTSUITE_ACCOUNT_ID) {
     console.error("[DELIVERY LIST] Missing SmartSuite credentials");
     return;
   }
 
-  const tableId = "6925b0fb90de6fdfbd33e096";
-  const fieldId = "sb1a7b32b6";
-
   try {
     // Clear the existing file field by setting it to null
     const clearResponse = await fetch(
-      `https://app.smartsuite.com/api/v1/applications/${tableId}/records/${recordId}/`,
+      `https://app.smartsuite.com/api/v1/applications/${SMARTSUITE_DELIVERY_TABLE_ID}/records/${recordId}/`,
       {
         method: "PATCH",
         headers: {
-          Authorization: `Token ${apiKey}`,
-          "ACCOUNT-ID": accountId,
+          Authorization: `Token ${SMARTSUITE_API_KEY}`,
+          "ACCOUNT-ID": SMARTSUITE_ACCOUNT_ID,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          [fieldId]: null,
+          [SMARTSUITE_DELIVERY_LIST_FIELD_ID]: null,
         }),
       },
     );
@@ -671,12 +643,12 @@ async function uploadDeliveryListPDFToSmartSuite(
     formData.append("filename", filename);
 
     const uploadResponse = await fetch(
-      `https://app.smartsuite.com/api/v1/recordfiles/${tableId}/${recordId}/${fieldId}/`,
+      `https://app.smartsuite.com/api/v1/recordfiles/${SMARTSUITE_DELIVERY_TABLE_ID}/${recordId}/${SMARTSUITE_DELIVERY_LIST_FIELD_ID}/`,
       {
         method: "POST",
         headers: {
-          Authorization: `Token ${apiKey}`,
-          "ACCOUNT-ID": accountId,
+          Authorization: `Token ${SMARTSUITE_API_KEY}`,
+          "ACCOUNT-ID": SMARTSUITE_ACCOUNT_ID,
         },
         body: formData,
       },
