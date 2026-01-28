@@ -189,12 +189,58 @@ async function generateDeliveryListPDF(
 
     // Table headers
     const columnWidths = [
-      contentWidth * 0.28,
-      contentWidth * 0.3,
-      contentWidth * 0.32,
-      contentWidth * 0.1,
+      contentWidth * 0.24,
+      contentWidth * 0.31,
+      contentWidth * 0.31,
+      contentWidth * 0.14,
     ];
     const rowHeight = 20;
+    const headerHeight = 25;
+
+    // Draw header row
+    page.drawRectangle({
+      x: margin,
+      y: yPosition - headerHeight,
+      width: contentWidth,
+      height: headerHeight,
+      borderColor: rgb(0.8, 0.8, 0.8),
+      borderWidth: 1,
+      color: rgb(0.95, 0.95, 0.95),
+    });
+
+    const headers = [
+      "Box Size",
+      "Address",
+      "Delivery Instructions",
+      "Customer ID",
+    ];
+    let headerColumnX = margin;
+
+    headers.forEach((header, columnIndex) => {
+      page.drawText(header, {
+        x: headerColumnX + 5,
+        y: yPosition - 17,
+        size: 10,
+        color: rgb(0, 0, 0),
+        maxWidth: columnWidths[columnIndex] - 10,
+      });
+
+      // Draw vertical dividers (except after last column)
+      if (columnIndex < headers.length - 1) {
+        page.drawLine({
+          start: { x: headerColumnX + columnWidths[columnIndex], y: yPosition },
+          end: {
+            x: headerColumnX + columnWidths[columnIndex],
+            y: yPosition - headerHeight,
+          },
+          color: rgb(0.8, 0.8, 0.8),
+        });
+      }
+
+      headerColumnX += columnWidths[columnIndex];
+    });
+
+    yPosition -= headerHeight;
 
     // Draw records
     for (const record of records) {
@@ -479,10 +525,17 @@ async function generateLabelsListPDF(
   const pageWidth = 595; // A4 width in points
   const pageHeight = 842; // A4 height in points
 
+  // Sort records by item text to group same values together
+  const sortedRecords = [...records].sort((a, b) => {
+    const itemA = extractItemValue(a.s019f88929);
+    const itemB = extractItemValue(b.s019f88929);
+    return itemA.localeCompare(itemB);
+  });
+
   let labelIndex = 0;
   let page = pdfDoc.addPage([pageWidth, pageHeight]);
 
-  for (const record of records) {
+  for (const record of sortedRecords) {
     // Calculate position on page
     const rowIndex = Math.floor(labelIndex / labelsPerRow);
     const colIndex = labelIndex % labelsPerRow;
