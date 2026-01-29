@@ -74,6 +74,9 @@ export async function POST(req: NextRequest) {
         start_time: null,
         join_url: null,
         topic: null,
+        webinar_id: null,
+        is_today: 0,
+        is_tomorrow: 0,
       });
     }
 
