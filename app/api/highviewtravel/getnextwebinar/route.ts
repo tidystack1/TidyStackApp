@@ -65,7 +65,6 @@ export async function POST(req: NextRequest) {
 
     const now = new Date();
 
-    // Filter future webinars
     const upcoming = webinars.filter((w: any) => new Date(w.start_time) > now);
 
     if (upcoming.length === 0) {
