@@ -220,6 +220,52 @@ async function sendRequesterEmail({
   const record = details.data?.[0] || {};
 
   const formTypeName = humanizeFormType(reimbursementType);
+  // Determine amount depending on form type and available fields
+  let amountValue: unknown = undefined;
+  if (reimbursementType === "mileage-reimbursement") {
+    if (record["Total_Miles_multiplied"] != null) {
+      amountValue = record["Total_Miles_multiplied"];
+    } else if (record["Total_Miles"] != null) {
+      const milesNum =
+        typeof record["Total_Miles"] === "number"
+          ? record["Total_Miles"]
+          : Number(record["Total_Miles"]) || 0;
+      amountValue = +(milesNum * 0.73).toFixed(2);
+    } else if (Array.isArray(record["Mileage_Reimbursement"])) {
+      const rows = record["Mileage_Reimbursement"] as Array<
+        Record<string, unknown>
+      >;
+      let totalMiles = 0;
+      for (const r of rows) {
+        const m = r["Number_Of_Miles"];
+        const mn = typeof m === "number" ? m : Number(m) || 0;
+        totalMiles += mn;
+      }
+      amountValue = +(totalMiles * 0.73).toFixed(2);
+    }
+  } else {
+    // expense-reimbursement or petty-cash
+    if (record["Amount"] != null) {
+      amountValue = record["Amount"];
+    } else if (Array.isArray(record["Subform_1"])) {
+      const rows = record["Subform_1"] as Array<Record<string, unknown>>;
+      let total = 0;
+      for (const r of rows) {
+        const a = r["Amount"];
+        const an = typeof a === "number" ? a : Number(a) || 0;
+        total += an;
+      }
+      amountValue = +total.toFixed(2);
+    } else if (record["Total_Amount"] != null) {
+      amountValue = record["Total_Amount"];
+    }
+  }
+
+  const rawAmount =
+    coerceString(amountValue) ??
+    (typeof amountValue === "number" ? String(amountValue) : undefined);
+  const amountForSentence = rawAmount ? ` for $${rawAmount}` : "";
+  const amountDisplay = rawAmount ? `$${rawAmount}` : "N/A";
   const submissionDate = new Date().toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
@@ -250,7 +296,7 @@ async function sendRequesterEmail({
           </div>
           
           <p>Hi,</p>
-          <p>Thank you for submitting your ${formTypeName}. We've received your submission and will process it shortly.</p>
+          <p>Thank you for submitting your ${formTypeName}${amountForSentence}. We've received your submission and will process it shortly.</p>
           
           <div class="details">
             <div class="detail-row">
@@ -272,11 +318,11 @@ async function sendRequesterEmail({
                 : ""
             }
             ${
-              record["Amount"]
+              rawAmount
                 ? `
             <div class="detail-row">
               <span class="detail-label">Amount:</span>
-              <span class="detail-value">$${record["Amount"]}</span>
+              <span class="detail-value">${amountDisplay}</span>
             </div>
             `
                 : ""
@@ -311,7 +357,7 @@ async function sendRequesterEmail({
     to: requesterEmail,
     subject: `CCHealthcare ${formTypeName} - Submission Received`,
     html,
-    text: `Your ${formTypeName} submission to CCHealthcare was successfully received on ${submissionDate}.`,
+    text: `Your ${formTypeName}${amountForSentence} submission to CCHealthcare was successfully received on ${submissionDate}.`,
   });
 }
 
