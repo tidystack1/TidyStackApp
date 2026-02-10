@@ -339,11 +339,6 @@ async function sendRequesterEmail({
             }
           </div>
           
-          <p>You can expect to receive updates about your submission as it progresses through our approval process.</p>
-          
-          <p>If you have any questions, please don't hesitate to reach out.</p>
-          
-          <p>Best regards,<br>CCHealthcare Reimbursement Team</p>
           
         
         </div>
