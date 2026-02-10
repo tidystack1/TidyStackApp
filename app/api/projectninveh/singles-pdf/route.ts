@@ -233,13 +233,13 @@ async function fetchAllSmartSuiteRecords({
           limit,
           offset,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(
-        `SmartSuite list records failed: ${response.status} ${errorText}`
+        `SmartSuite list records failed: ${response.status} ${errorText}`,
       );
     }
 
@@ -307,7 +307,10 @@ function wrapTextToWidth({
   return lines;
 }
 
-async function generateSinglesPdf(rows: Array<Record<string, string>>) {
+async function generateSinglesPdf(
+  rows: Array<Record<string, string>>,
+  sortedByLabel = "Age",
+) {
   type SinglesPdfRow = {
     firstName: string;
     lastName: string;
@@ -371,7 +374,7 @@ async function generateSinglesPdf(rows: Array<Record<string, string>>) {
   if (totalWidth > contentWidth) {
     // Should not happen with current widths, but guard anyway.
     throw new Error(
-      `PDF columns exceed width (${totalWidth} > ${contentWidth}).`
+      `PDF columns exceed width (${totalWidth} > ${contentWidth}).`,
     );
   }
 
@@ -404,7 +407,7 @@ async function generateSinglesPdf(rows: Array<Record<string, string>>) {
     let x = margin;
     for (let i = 0; i < columns.length; i++) {
       const col = columns[i];
-      const text = isHeader ? col.label : values?.[col.key] ?? "";
+      const text = isHeader ? col.label : (values?.[col.key] ?? "");
       const fontToUse = isHeader ? boldFont : font;
       const maxTextWidth = col.width - cellPaddingX * 2;
       const maxLines = isHeader ? 5 : 3;
@@ -448,7 +451,7 @@ async function generateSinglesPdf(rows: Array<Record<string, string>>) {
   let y = pageHeight - margin;
 
   // Title
-  const title = `Project Ninveh - Singles Export - Sorted by Age (${rows.length} records)`;
+  const title = `Project Ninveh - Singles Export - Sorted by ${sortedByLabel} (${rows.length} records)`;
   page.drawText(title, {
     x: margin,
     y,
@@ -490,7 +493,7 @@ async function generateSinglesPdf(rows: Array<Record<string, string>>) {
     });
     const rowHeight = Math.max(
       headerHeight,
-      Math.max(...maxLineCounts) * lineHeight + cellPaddingY * 2
+      Math.max(...maxLineCounts) * lineHeight + cellPaddingY * 2,
     );
 
     if (y - rowHeight < margin) {
@@ -548,14 +551,14 @@ async function clearSmartSuiteFileField({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ [fieldId]: null }),
-    }
+    },
   );
 
   // Clearing is best-effort (upload still works even if this fails in many cases).
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     console.warn(
-      `[PROJECT_NINVEH] Failed to clear existing file field: ${response.status} ${text}`
+      `[PROJECT_NINVEH] Failed to clear existing file field: ${response.status} ${text}`,
     );
   }
 }
@@ -594,13 +597,13 @@ async function uploadSmartSuiteFileToRecord({
         "ACCOUNT-ID": accountId,
       },
       body: formData,
-    }
+    },
   );
 
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `SmartSuite file upload failed: ${response.status} ${errorText}`
+      `SmartSuite file upload failed: ${response.status} ${errorText}`,
     );
   }
 }
@@ -610,21 +613,47 @@ export async function POST(req: NextRequest) {
     const expectedPassword = requireEnv("PROJECT_NINVEH_API_PASSWORD").trim();
 
     const body = await req.json();
-    const password = isRecord(body) ? coerceString(body.password) : undefined;
+    const password = isRecord(body)
+      ? coerceString(
+          (body as Record<string, unknown>).password ??
+            (body as Record<string, unknown>).Password,
+        )
+      : undefined;
     if ((password ?? "").trim() !== expectedPassword) {
       return NextResponse.json({ error: "Invalid password" }, { status: 401 });
+    }
+
+    // Parse webhook parameters: accept either capitalized or camelCase keys
+    const table = isRecord(body)
+      ? coerceDisplayText(
+          (body as Record<string, unknown>).Table ??
+            (body as Record<string, unknown>).table,
+        )
+      : "";
+    const singlesSortBy = isRecord(body)
+      ? coerceDisplayText(
+          (body as Record<string, unknown>).SinglesSortBy ??
+            (body as Record<string, unknown>).singlesSortBy,
+        )
+      : "";
+
+    if ((table ?? "").toLowerCase() !== "singles") {
+      return NextResponse.json(
+        { error: "Unsupported table; only 'Singles' is supported" },
+        { status: 400 },
+      );
     }
 
     const apiKey = requireEnv("PROJECT_NINVEH_SMARTSUITE_API_KEY");
     const accountId = requireEnv("PROJECT_NINVEH_SMARTSUITE_ACCOUNT_ID");
     const singlesTableId = requireEnv(
-      "PROJECT_NINVEH_SMARTSUITE_SINGLES_TABLE_ID"
+      "PROJECT_NINVEH_SMARTSUITE_SINGLES_TABLE_ID",
     );
     const reportsTableId = requireEnv(
-      "PROJECT_NINVEH_SMARTSUITE_REPORTS_TABLE_ID"
+      "PROJECT_NINVEH_SMARTSUITE_REPORTS_TABLE_ID",
     );
     const reportsRecordId = requireEnv(
-      "PROJECT_NINVEH_SMARTSUITE_REPORTS_RECORD_ID"
+      "PROJECT_NINVEH_SMARTSUITE_REPORTS_RECORD_ID",
     );
     const reportsFieldId = getReportsPdfFieldId();
 
@@ -640,12 +669,21 @@ export async function POST(req: NextRequest) {
       .map((r) => {
         const { firstName, lastName } = extractFullNameParts(r["singles_name"]);
 
+        const dobIso = extractDateString(r["s4b6358f05"]);
+        let dobMonthDayKey = 0;
+        if (dobIso) {
+          const d = new Date(dobIso);
+          if (!Number.isNaN(d.getTime())) {
+            dobMonthDayKey = (d.getMonth() + 1) * 100 + d.getDate();
+          }
+        }
+
         return {
           firstName,
           lastName,
           partnerAdvocate: extractLinkedRecordTitles(r["s7c5f198f0"]),
           partnerRelationship: mapRelationshipToLabel(
-            r["relationship_to_single"]
+            r["relationship_to_single"],
           ),
           age: coerceDisplayText(r["s32a1b2047"]),
           singlesCell: coerceDisplayText(r["sa80937d3c"]),
@@ -654,8 +692,57 @@ export async function POST(req: NextRequest) {
           formType: mapFormTypeToLabel(r["sf559e7b8a"]),
           city: coerceDisplayText(r["s95c524609"]),
           dob: formatDate(r["s4b6358f05"]),
+          __dobMonthDayKey: String(dobMonthDayKey),
         };
       });
+
+    // Determine sort preference (default to 'singles_age')
+    const sortChoice = (singlesSortBy || "singles_age").trim();
+
+    // Apply sorting client-side based on webhook parameter
+    if (sortChoice === "singles_age") {
+      rows.sort((a, b) => {
+        const aAge = parseFloat(a.age ?? "") || 0;
+        const bAge = parseFloat(b.age ?? "") || 0;
+        if (bAge !== aAge) return bAge - aAge; // descending ages first
+        const last = (a.lastName ?? "").localeCompare(b.lastName ?? "", "en", {
+          sensitivity: "base",
+        });
+        if (last !== 0) return last;
+        return (a.firstName ?? "").localeCompare(b.firstName ?? "", "en", {
+          sensitivity: "base",
+        });
+      });
+    } else if (sortChoice === "preferred_long_term_plan") {
+      rows.sort((a, b) => {
+        const cmp = (a.preferredLongTermPlan ?? "").localeCompare(
+          b.preferredLongTermPlan ?? "",
+          "en",
+          { sensitivity: "base" },
+        );
+        if (cmp !== 0) return cmp;
+        const last = (a.lastName ?? "").localeCompare(b.lastName ?? "", "en", {
+          sensitivity: "base",
+        });
+        if (last !== 0) return last;
+        return (a.firstName ?? "").localeCompare(b.firstName ?? "", "en", {
+          sensitivity: "base",
+        });
+      });
+    } else if (sortChoice === "birthday") {
+      rows.sort((a, b) => {
+        const aKey = parseInt(a.__dobMonthDayKey ?? "0", 10) || 0;
+        const bKey = parseInt(b.__dobMonthDayKey ?? "0", 10) || 0;
+        if (aKey !== bKey) return aKey - bKey; // month/day ascending (Jan first)
+        const last = (a.lastName ?? "").localeCompare(b.lastName ?? "", "en", {
+          sensitivity: "base",
+        });
+        if (last !== 0) return last;
+        return (a.firstName ?? "").localeCompare(b.firstName ?? "", "en", {
+          sensitivity: "base",
+        });
+      });
+    }
 
     // Sort by last name, then first name for nicer output.
     // rows.sort((a, b) => {
@@ -668,7 +755,23 @@ export async function POST(req: NextRequest) {
     //   });
     // });
 
-    const pdfBuffer = await generateSinglesPdf(rows);
+    const sortLabel =
+      sortChoice === "singles_age"
+        ? "Age"
+        : sortChoice === "preferred_long_term_plan"
+          ? "Preferred Long-Term Plan"
+          : sortChoice === "birthday"
+            ? "Birthday"
+            : sortChoice || "Age";
+    const pdfBuffer = await generateSinglesPdf(rows, sortLabel);
+
+    // Choose target SmartSuite file field depending on sort choice
+    let targetFieldId = reportsFieldId;
+    if (sortChoice === "preferred_long_term_plan") {
+      targetFieldId = "s3a50d737c";
+    } else if (sortChoice === "birthday") {
+      targetFieldId = "s7496e2668";
+    }
     const filename = `singles_${new Date().toISOString().slice(0, 10)}.pdf`;
 
     await clearSmartSuiteFileField({
@@ -676,7 +779,7 @@ export async function POST(req: NextRequest) {
       accountId,
       tableId: reportsTableId,
       recordId: reportsRecordId,
-      fieldId: reportsFieldId,
+      fieldId: targetFieldId,
     });
 
     await uploadSmartSuiteFileToRecord({
@@ -684,7 +787,7 @@ export async function POST(req: NextRequest) {
       accountId,
       tableId: reportsTableId,
       recordId: reportsRecordId,
-      fieldId: reportsFieldId,
+      fieldId: targetFieldId,
       buffer: pdfBuffer,
       filename,
       contentType: "application/pdf",
@@ -696,11 +799,11 @@ export async function POST(req: NextRequest) {
         recordCount: rows.length,
         reportsTableId,
         reportsRecordId,
-        reportsFieldId,
+        reportsFieldId: targetFieldId,
         filename,
         pdfSizeBytes: pdfBuffer.length,
       },
-      { status: 200 }
+      { status: 200 },
     );
   } catch (error) {
     console.error("[PROJECT_NINVEH] singles-pdf error:", error);
@@ -709,7 +812,7 @@ export async function POST(req: NextRequest) {
         error: "Failed to generate/upload singles PDF",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
