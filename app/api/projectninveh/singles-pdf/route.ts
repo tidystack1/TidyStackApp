@@ -149,6 +149,7 @@ function extractFullNameParts(value: unknown): {
 function mapRelationshipToLabel(raw: unknown): string {
   const hydrated = coerceDisplayText(raw);
   if (!hydrated) return "";
+  if (/^\[object\s+.+\]$/i.test(hydrated)) return "";
 
   // If SmartSuite already gave a label, keep it.
   if (!/^[A-Za-z0-9_]{3,}$/.test(hydrated)) return hydrated;
@@ -166,6 +167,7 @@ function mapRelationshipToLabel(raw: unknown): string {
 function mapFormTypeToLabel(raw: unknown): string {
   const hydrated = coerceDisplayText(raw);
   if (!hydrated) return "";
+  if (/^\[object\s+.+\]$/i.test(hydrated)) return "";
 
   // If SmartSuite already gave a label, keep it.
   if (!/^[A-Za-z0-9_]{3,}$/.test(hydrated)) return hydrated;
@@ -270,16 +272,38 @@ function wrapTextToWidth({
   font: PDFFont;
   fontSize: number;
   maxWidth: number;
-  maxLines: number;
+  maxLines?: number;
 }): string[] {
   const cleaned = (text ?? "").trim();
   if (!cleaned) return [""];
 
-  const words = cleaned.split(/\s+/);
+  const words = cleaned.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let current = "";
 
+  const pushWrappedWord = (word: string) => {
+    let remaining = word;
+    while (remaining.length > 0) {
+      let sliceEnd = remaining.length;
+      while (
+        sliceEnd > 1 &&
+        font.widthOfTextAtSize(remaining.slice(0, sliceEnd), fontSize) >
+          maxWidth
+      ) {
+        sliceEnd -= 1;
+      }
+      if (sliceEnd <= 0) sliceEnd = 1;
+      lines.push(remaining.slice(0, sliceEnd));
+      remaining = remaining.slice(sliceEnd);
+    }
+  };
+
   for (const word of words) {
+    if (!current && font.widthOfTextAtSize(word, fontSize) > maxWidth) {
+      pushWrappedWord(word);
+      continue;
+    }
+
     const test = current ? `${current} ${word}` : word;
     const width = font.widthOfTextAtSize(test, fontSize);
     if (width <= maxWidth || !current) {
@@ -288,12 +312,14 @@ function wrapTextToWidth({
     }
     lines.push(current);
     current = word;
-    if (lines.length >= maxLines) break;
+    if (maxLines && lines.length >= maxLines) break;
   }
-  if (lines.length < maxLines) lines.push(current);
+  if (!maxLines || lines.length < maxLines) {
+    lines.push(current);
+  }
 
-  if (lines.length > maxLines) return lines.slice(0, maxLines);
-  if (lines.length === maxLines) {
+  if (maxLines && lines.length > maxLines) return lines.slice(0, maxLines);
+  if (maxLines && lines.length === maxLines) {
     // If we truncated, append ellipsis to the last line if needed.
     const joined = words.join(" ");
     const reconstructed = lines.join(" ");
@@ -337,12 +363,12 @@ async function generateSinglesPdf(
   // A4 vertical (portrait).
   const pageWidth = 595;
   const pageHeight = 842;
-  const margin = 24;
+  const margin = 21;
   const headerHeight = 49;
   const fontSize = 7;
   const lineHeight = fontSize + 2;
-  const cellPaddingX = 4;
-  const cellPaddingY = 4;
+  const cellPaddingX = 3;
+  const cellPaddingY = 3;
   const borderColor = rgb(0.8, 0.8, 0.8);
   const headerBg = rgb(0.95, 0.95, 0.95);
   const highlightBg = rgb(1, 1, 0.7);
@@ -362,17 +388,17 @@ async function generateSinglesPdf(
       label: "Partner Relationship",
       width: 50,
     },
-    { key: "age", label: "Age", width: 20 },
-    { key: "singlesCell", label: "Single's Cell", width: 50 },
-    { key: "singlesEmail", label: "Single's Email", width: 85 },
+    { key: "age", label: "Age", width: 21 },
+    { key: "singlesCell", label: "Single's Cell", width: 53 },
+    { key: "singlesEmail", label: "Single's Email", width: 87 },
     {
       key: "preferredLongTermPlan",
       label: "What is her preferred long-term plan?",
-      width: 50,
+      width: 53,
     },
-    { key: "formType", label: "Form Type", width: 55 },
+    { key: "formType", label: "Form Type", width: 53 },
     { key: "city", label: "City", width: 45 },
-    { key: "dob", label: "DOB", width: 42 },
+    { key: "dob", label: "DOB", width: 45 },
   ];
 
   const totalWidth = columns.reduce((sum, c) => sum + c.width, 0);
@@ -415,7 +441,7 @@ async function generateSinglesPdf(
       const text = isHeader ? col.label : (values?.[col.key] ?? "");
       const fontToUse = isHeader ? boldFont : font;
       const maxTextWidth = col.width - cellPaddingX * 2;
-      const maxLines = isHeader ? 5 : 3;
+      const maxLines = isHeader ? 5 : undefined;
       const lines = wrapTextToWidth({
         text,
         font: fontToUse,
@@ -492,12 +518,11 @@ async function generateSinglesPdf(
         font,
         fontSize,
         maxWidth: maxTextWidth,
-        maxLines: 3,
       });
       return lines.length;
     });
     const rowHeight = Math.max(
-      headerHeight,
+      lineHeight + cellPaddingY * 2,
       Math.max(...maxLineCounts) * lineHeight + cellPaddingY * 2,
     );
 
@@ -769,6 +794,9 @@ export async function POST(req: NextRequest) {
           { sensitivity: "base" },
         );
         if (cmp !== 0) return cmp;
+        const aAge = parseFloat(a.age ?? "") || 0;
+        const bAge = parseFloat(b.age ?? "") || 0;
+        if (bAge !== aAge) return bAge - aAge; // descending ages first
         const last = (a.lastName ?? "").localeCompare(b.lastName ?? "", "en", {
           sensitivity: "base",
         });
