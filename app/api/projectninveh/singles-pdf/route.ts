@@ -14,6 +14,11 @@ const SMARTSUITE_API_BASE = "https://app.smartsuite.com/api/v1";
 // Per your requirement: upload the generated PDF into this SmartSuite field.
 const REPORTS_PDF_FIELD_ID = "s6e8011ad7";
 
+// Per your requirement: also set "last generated" timestamps by sort mode.
+const GENERATED_AT_PREFERRED_LONG_TERM_PLAN_FIELD_ID = "s3285f7de2";
+const GENERATED_AT_SINGLES_AGE_FIELD_ID = "s7b5a45cd5";
+const GENERATED_AT_BIRTHDAY_FIELD_ID = "s61bc41b89";
+
 type SmartSuiteListResponse = {
   items?: unknown[];
   total?: number;
@@ -608,6 +613,49 @@ async function uploadSmartSuiteFileToRecord({
   }
 }
 
+function getGeneratedAtFieldIdForSortChoice(sortChoice: string): string | null {
+  if (sortChoice === "preferred_long_term_plan") {
+    return GENERATED_AT_PREFERRED_LONG_TERM_PLAN_FIELD_ID;
+  }
+  if (sortChoice === "singles_age") return GENERATED_AT_SINGLES_AGE_FIELD_ID;
+  if (sortChoice === "birthday") return GENERATED_AT_BIRTHDAY_FIELD_ID;
+  return null;
+}
+
+async function patchSmartSuiteRecordFields({
+  apiKey,
+  accountId,
+  tableId,
+  recordId,
+  fields,
+}: {
+  apiKey: string;
+  accountId: string;
+  tableId: string;
+  recordId: string;
+  fields: Record<string, unknown>;
+}) {
+  const response = await fetch(
+    `${SMARTSUITE_API_BASE}/applications/${tableId}/records/${recordId}/`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        "ACCOUNT-ID": accountId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(fields),
+    },
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `SmartSuite record update failed: ${response.status} ${errorText}`,
+    );
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const expectedPassword = requireEnv("PROJECT_NINVEH_API_PASSWORD").trim();
@@ -793,6 +841,18 @@ export async function POST(req: NextRequest) {
       contentType: "application/pdf",
     });
 
+    const generatedAtFieldId = getGeneratedAtFieldIdForSortChoice(sortChoice);
+    const generatedAtIso = new Date().toISOString();
+    if (generatedAtFieldId) {
+      await patchSmartSuiteRecordFields({
+        apiKey,
+        accountId,
+        tableId: reportsTableId,
+        recordId: reportsRecordId,
+        fields: { [generatedAtFieldId]: generatedAtIso },
+      });
+    }
+
     return NextResponse.json(
       {
         message: "Singles PDF generated and uploaded to SmartSuite",
@@ -800,6 +860,8 @@ export async function POST(req: NextRequest) {
         reportsTableId,
         reportsRecordId,
         reportsFieldId: targetFieldId,
+        generatedAtFieldId,
+        generatedAt: generatedAtIso,
         filename,
         pdfSizeBytes: pdfBuffer.length,
       },
