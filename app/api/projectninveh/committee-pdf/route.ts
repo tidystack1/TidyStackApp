@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import {
   PDFDocument,
   type PDFFont,
@@ -31,10 +31,6 @@ type CommitteeExpandedRow = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function coerceString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
 }
 
 function coerceDisplayText(value: unknown): string {
@@ -631,21 +627,8 @@ async function patchSmartSuiteRecordFields({
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST() {
   try {
-    const expectedPassword = requireEnv("PROJECT_NINVEH_API_PASSWORD").trim();
-    const body = await req.json();
-    const password = isRecord(body)
-      ? coerceString(
-          (body as Record<string, unknown>).password ??
-            (body as Record<string, unknown>).Password,
-        )
-      : undefined;
-
-    if ((password ?? "").trim() !== expectedPassword) {
-      return NextResponse.json({ error: "Invalid password" }, { status: 401 });
-    }
-
     const apiKey = requireEnv("PROJECT_NINVEH_SMARTSUITE_API_KEY");
     const accountId = requireEnv("PROJECT_NINVEH_SMARTSUITE_ACCOUNT_ID");
     const committeeTableId = requireEnv(
