@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import {
-  PDFDocument,
-  type PDFFont,
-  StandardFonts,
-  rgb,
-} from "pdf-lib";
+import { PDFDocument, type PDFFont, StandardFonts, rgb } from "pdf-lib";
 
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+}
 export const runtime = "nodejs";
 
 const SMARTSUITE_API_BASE = "https://app.smartsuite.com/api/v1";
@@ -72,7 +74,10 @@ function requireEnv(name: string): string {
   return value;
 }
 
-function extractNameParts(value: unknown): { firstName: string; lastName: string } {
+function extractNameParts(value: unknown): {
+  firstName: string;
+  lastName: string;
+} {
   if (!isRecord(value)) {
     const full = coerceDisplayText(value);
     if (!full) return { firstName: "", lastName: "" };
@@ -245,7 +250,8 @@ function wrapTextToWidth({
       let sliceEnd = remaining.length;
       while (
         sliceEnd > 1 &&
-        font.widthOfTextAtSize(remaining.slice(0, sliceEnd), fontSize) > maxWidth
+        font.widthOfTextAtSize(remaining.slice(0, sliceEnd), fontSize) >
+          maxWidth
       ) {
         sliceEnd -= 1;
       }
@@ -292,7 +298,9 @@ function wrapTextToWidth({
   return lines;
 }
 
-async function generateCommitteePdf(rows: CommitteeExpandedRow[]): Promise<Buffer> {
+async function generateCommitteePdf(
+  rows: CommitteeExpandedRow[],
+): Promise<Buffer> {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -309,12 +317,24 @@ async function generateCommitteePdf(rows: CommitteeExpandedRow[]): Promise<Buffe
   const headerBg = rgb(0.95, 0.95, 0.95);
   const groupBg = rgb(0.9, 0.95, 1);
 
-  const columns: Array<{ key: keyof CommitteeExpandedRow; label: string; width: number }> = [
+  const columns: Array<{
+    key: keyof CommitteeExpandedRow;
+    label: string;
+    width: number;
+  }> = [
     { key: "firstName", label: "First Name", width: 60 },
     { key: "lastName", label: "Last Name", width: 60 },
     { key: "city", label: "City", width: 75 },
-    { key: "committeeFirstChoice", label: "Committee First Choice", width: 110 },
-    { key: "committeeSecondChoice", label: "Committee Second Choice", width: 110 },
+    {
+      key: "committeeFirstChoice",
+      label: "Committee First Choice",
+      width: 110,
+    },
+    {
+      key: "committeeSecondChoice",
+      label: "Committee Second Choice",
+      width: 110,
+    },
     { key: "status", label: "Status", width: 60 },
     { key: "approvedFor", label: "Approved For", width: 78 },
   ];
@@ -330,7 +350,13 @@ async function generateCommitteePdf(rows: CommitteeExpandedRow[]): Promise<Buffe
 
   const drawHeader = () => {
     const title = `Project Ninveh - Committee Export (${rows.length} rows)`;
-    page.drawText(title, { x: margin, y, size: 14, font: bold, color: rgb(0, 0, 0) });
+    page.drawText(title, {
+      x: margin,
+      y,
+      size: 14,
+      font: bold,
+      color: rgb(0, 0, 0),
+    });
     y -= 18;
     page.drawText(`Generated: ${new Date().toLocaleString("en-US")}`, {
       x: margin,
@@ -408,7 +434,10 @@ async function generateCommitteePdf(rows: CommitteeExpandedRow[]): Promise<Buffe
       borderWidth: 1,
       color: groupBg,
     });
-    const title = groupLabel === "Not Approved" ? "Not Approved" : `Approved For: ${groupLabel}`;
+    const title =
+      groupLabel === "Not Approved"
+        ? "Not Approved"
+        : `Approved For: ${groupLabel}`;
     page.drawText(title, {
       x: margin + 4,
       y: y - groupHeight + 6,
@@ -626,8 +655,13 @@ async function patchSmartSuiteRecordFields({
     );
   }
 }
-
-export async function POST() {
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders(),
+  });
+}
+export async function POST(req: Request) {
   try {
     const apiKey = requireEnv("PROJECT_NINVEH_SMARTSUITE_API_KEY");
     const accountId = requireEnv("PROJECT_NINVEH_SMARTSUITE_ACCOUNT_ID");
@@ -744,7 +778,7 @@ export async function POST() {
         filename,
         pdfSizeBytes: pdfBuffer.length,
       },
-      { status: 200 },
+      { status: 200, headers: corsHeaders() },
     );
   } catch (error) {
     console.error("[PROJECT_NINVEH] committee-pdf error:", error);
@@ -753,7 +787,7 @@ export async function POST() {
         error: "Failed to generate/upload committee PDF",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 },
+      { status: 500, headers: corsHeaders() },
     );
   }
 }
