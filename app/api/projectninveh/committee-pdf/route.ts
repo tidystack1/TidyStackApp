@@ -336,7 +336,6 @@ async function generateCommitteePdf(
       width: 110,
     },
     { key: "status", label: "Status", width: 60 },
-    { key: "approvedFor", label: "Approved For", width: 78 },
   ];
 
   const totalWidth = columns.reduce((sum, c) => sum + c.width, 0);
