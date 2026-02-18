@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Utility: get Zoom access token (Server-to-Server OAuth)
-async function getZoomAccessToken() {
-  const creds = Buffer.from(
-    `${process.env.ZOOM_CLIENT_ID}:${process.env.ZOOM_CLIENT_SECRET}`,
-  ).toString("base64");
-
+/**
+ * Get Zoom access token (Server-to-Server OAuth)
+ * Uses pre-encoded base64 credentials from env:
+ * HIGHVIEWTRAVEL_ZOOM_CLIENT_SECRET
+ */
+async function getZoomAccessToken(): Promise<string> {
   const res = await fetch("https://zoom.us/oauth/token", {
     method: "POST",
     headers: {
@@ -21,16 +21,16 @@ async function getZoomAccessToken() {
   if (!res.ok) {
     const errorData = await res.json();
     console.error("Zoom token error:", errorData);
-    throw new Error(
-      `Failed to get Zoom access token: ${JSON.stringify(errorData)}`,
-    );
+    throw new Error("Failed to get Zoom access token");
   }
 
   const data = await res.json();
-  return data.access_token as string;
+  return data.access_token;
 }
 
-// Utility: fetch upcoming webinars
+/**
+ * Fetch upcoming webinars
+ */
 async function getUpcomingWebinars(token: string) {
   const res = await fetch(
     "https://api.zoom.us/v2/users/me/webinars?type=upcoming&page_size=100",
@@ -49,10 +49,28 @@ async function getUpcomingWebinars(token: string) {
   return data.webinars ?? [];
 }
 
-// POST handler
+/**
+ * Fetch full webinar details (to get registration_url)
+ */
+async function getWebinarDetails(token: string, webinarId: string) {
+  const res = await fetch(`https://api.zoom.us/v2/webinars/${webinarId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch webinar details");
+  }
+
+  return await res.json();
+}
+
+/**
+ * POST handler
+ */
 export async function POST(req: NextRequest) {
   try {
-    // Validate password
     const body = await req.json();
     const password = body.password;
 
@@ -65,13 +83,20 @@ export async function POST(req: NextRequest) {
 
     const now = new Date();
 
-    const upcoming = webinars.filter((w: any) => new Date(w.start_time) > now);
+    const upcoming = webinars
+      .filter((w: any) => new Date(w.start_time) > now)
+      .sort(
+        (a: any, b: any) =>
+          new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+      );
 
     if (upcoming.length === 0) {
       return NextResponse.json({
         active: false,
         start_time: null,
+        start_date: null,
         join_url: null,
+        registration_url: null,
         topic: null,
         webinar_id: null,
         is_today: 0,
@@ -79,27 +104,30 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Sort by soonest start time
-    upcoming.sort(
-      (a: any, b: any) =>
-        new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
-    );
-
     const next = upcoming[0];
+    const startDateObj = new Date(next.start_time);
+
+    const webinarDetails = await getWebinarDetails(token, next.id);
+
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
 
     return NextResponse.json({
       active: true,
-      start_time: next.start_time, // ISO UTC
+      start_time: next.start_time,
+      start_date: startDateObj.toLocaleString("en-US", {
+        timeZone: "America/New_York",
+        month: "2-digit",
+        day: "2-digit",
+        year: "numeric",
+      }),
       join_url: next.join_url || null,
+      registration_url: webinarDetails.registration_url || null,
       topic: next.topic || null,
       webinar_id: next.id,
-      is_today:
-        new Date(next.start_time).toDateString() === now.toDateString() ? 1 : 0,
+      is_today: startDateObj.toDateString() === now.toDateString() ? 1 : 0,
       is_tomorrow:
-        new Date(next.start_time).toDateString() ===
-        new Date(now.getTime() + 24 * 60 * 60 * 1000).toDateString()
-          ? 1
-          : 0,
+        startDateObj.toDateString() === tomorrow.toDateString() ? 1 : 0,
     });
   } catch (err: any) {
     console.error(err);
