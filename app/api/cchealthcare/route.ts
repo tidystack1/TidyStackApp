@@ -142,6 +142,8 @@ export async function POST(request: NextRequest) {
       requesterEmail,
       reimbursementType,
       recordDetails,
+      pdfBuffer,
+      recordId,
     });
 
     const smartSuiteRecord = await createSmartSuiteRecord(
@@ -209,10 +211,14 @@ async function sendRequesterEmail({
   requesterEmail,
   reimbursementType,
   recordDetails,
+  pdfBuffer,
+  recordId,
 }: {
   requesterEmail: string;
   reimbursementType: FormType;
   recordDetails: unknown;
+  pdfBuffer: Buffer;
+  recordId: string;
 }) {
   const transporter = createTransporter();
 
@@ -353,6 +359,13 @@ async function sendRequesterEmail({
     subject: `CCHealthcare ${formTypeName} - Submission Received`,
     html,
     text: `Your ${formTypeName}${amountForSentence} submission to CCHealthcare was successfully received on ${submissionDate}.`,
+    attachments: [
+      {
+        filename: `combined-${recordId}.pdf`,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
   });
 }
 
