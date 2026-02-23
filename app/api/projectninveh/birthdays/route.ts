@@ -168,6 +168,13 @@ function parseMonthFilter(value: unknown): number | null {
   return MONTH_NAME_TO_NUM[value.trim().toLowerCase()] ?? null;
 }
 
+function parseDateToMonthFilter(value: unknown): number | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const d = new Date(value.trim());
+  if (Number.isNaN(d.getTime())) return null;
+  return d.getUTCMonth() + 1;
+}
+
 async function fetchAllSmartSuiteRecords({
   apiKey,
   accountId,
@@ -648,9 +655,12 @@ export async function POST(req: Request) {
       // no body or invalid JSON — treat as no filter
     }
 
-    const monthFilter = isRecord(body)
-      ? parseMonthFilter((body as Record<string, unknown>)["month"])
-      : null;
+    const monthFilter = (() => {
+      if (!isRecord(body)) return null;
+      const fromDate = parseDateToMonthFilter(body["date"]);
+      if (fromDate !== null) return fromDate;
+      return parseMonthFilter(body["month"]);
+    })();
 
     const apiKey = requireEnv("PROJECT_NINVEH_SMARTSUITE_API_KEY");
     const accountId = requireEnv("PROJECT_NINVEH_SMARTSUITE_ACCOUNT_ID");
