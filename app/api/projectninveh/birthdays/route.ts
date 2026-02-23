@@ -38,6 +38,7 @@ type BirthdayRow = {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
+  team: string;
   source: string;
   monthNum: number;
   dayNum: number;
@@ -318,10 +319,11 @@ async function generateBirthdaysPdf(
   const groupBg = rgb(0.9, 0.95, 1);
 
   const columns: Array<{ label: string; width: number; key: keyof BirthdayRow }> = [
-    { key: "firstName", label: "First Name", width: 120 },
-    { key: "lastName", label: "Last Name", width: 120 },
-    { key: "dateOfBirth", label: "Date of Birth", width: 70 },
-    { key: "source", label: "Table", width: 100 },
+    { key: "firstName", label: "First Name", width: 105 },
+    { key: "lastName", label: "Last Name", width: 105 },
+    { key: "dateOfBirth", label: "Date of Birth", width: 65 },
+    { key: "team", label: "Team", width: 90 },
+    { key: "source", label: "Table", width: 90 },
   ];
 
   const totalWidth = columns.reduce((sum, c) => sum + c.width, 0);
@@ -619,6 +621,7 @@ function collectRows(
   nameFieldId: string,
   birthdayFieldId: string,
   monthFilter: number | null,
+  teamFieldId?: string,
 ): BirthdayRow[] {
   const rows: BirthdayRow[] = [];
   for (const record of records) {
@@ -627,10 +630,12 @@ function collectRows(
     const bday = parseBirthday(record[birthdayFieldId]);
     if (!bday) continue;
     if (monthFilter !== null && bday.monthNum !== monthFilter) continue;
+    const team = teamFieldId ? coerceDisplayText(record[teamFieldId]) : "";
     rows.push({
       firstName,
       lastName,
       dateOfBirth: bday.display,
+      team,
       source,
       monthNum: bday.monthNum,
       dayNum: bday.dayNum,
@@ -679,8 +684,8 @@ export async function POST(req: Request) {
 
     const rows: BirthdayRow[] = [
       ...collectRows(committeeRecords, "Committee", "s136335e0e", "birthday", monthFilter),
-      ...collectRows(partnerAdvocatesRecords, "Partner Advocate", "s136335e0e", "birthday", monthFilter),
-      ...collectRows(singlesRecords, "Single", "singles_name", "s4b6358f05", monthFilter),
+      ...collectRows(partnerAdvocatesRecords, "Partner Advocate", "s136335e0e", "birthday", monthFilter, "sd0282f4f0"),
+      ...collectRows(singlesRecords, "Single", "singles_name", "s4b6358f05", monthFilter, "s341231326"),
     ];
 
     const pdfBuffer = await generateBirthdaysPdf(rows, monthFilter);
