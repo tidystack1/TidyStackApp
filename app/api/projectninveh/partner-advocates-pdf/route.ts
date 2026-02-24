@@ -21,6 +21,11 @@ type SmartSuiteListResponse = {
   limit?: number;
 };
 
+const PARTNER_PREFERENCE_FIELD_ID = "sc11a3c496";
+const SINGLES_SUBMITTED_FIELD_ID = "s8f1e0b31f";
+const PARTNER_PREFERENCE_YES = "yzzsI";
+const PARTNER_PREFERENCE_NO = "ndBgJ";
+
 type PartnerAdvocateRow = {
   firstName: string;
   lastName: string;
@@ -29,6 +34,10 @@ type PartnerAdvocateRow = {
   dateOfBirth: string;
   followUpRequired: boolean;
   teamId: string;
+  /** "yzzsI" = Yes have partner, "ndBgJ" = No please pair me */
+  partnerPreference: string;
+  /** Singles Submitted as text (number) */
+  singlesSubmitted: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -133,6 +142,26 @@ function extractFollowUpRequired(value: unknown): boolean {
   }
   if (typeof value === "number") return value !== 0;
   return false;
+}
+
+/** Extract select option id (e.g. "yzzsI", "ndBgJ") from SmartSuite field value. */
+function extractSelectValueId(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (!isRecord(value)) return "";
+  const options = value["selected_options"];
+  if (Array.isArray(options) && options.length > 0 && isRecord(options[0])) {
+    const id =
+      (options[0]["value"] as string) ??
+      (options[0]["id"] as string) ??
+      coerceDisplayText(options[0]);
+    return typeof id === "string" ? id.trim() : "";
+  }
+  const id =
+    (value["value"] as string) ??
+    (value["id"] as string) ??
+    coerceDisplayText(value);
+  return typeof id === "string" ? id.trim() : "";
 }
 
 async function fetchAllSmartSuiteRecords({
@@ -277,6 +306,21 @@ async function generatePartnerAdvocatesPdf(
   const borderColor = rgb(0.8, 0.8, 0.8);
   const headerBg = rgb(0.95, 0.95, 0.95);
   const rowHighlightBg = rgb(1, 0.82, 0.82);
+  const rowGreen = rgb(0.82, 1, 0.82);
+  const rowYellow = rgb(1, 1, 0.82);
+  const rowRed = rgb(1, 0.82, 0.82);
+
+  /** No → red (preference). Yes + singles ≥ 1 → green. Yes + singles < 1 → yellow. */
+  const getRowShade = (row: PartnerAdvocateRow) => {
+    const pref = row.partnerPreference;
+    const raw = (row.singlesSubmitted ?? "").trim();
+    const num = raw === "" ? NaN : parseInt(raw, 10);
+    const hasSingles = !Number.isNaN(num) && num >= 1;
+    if (pref === PARTNER_PREFERENCE_NO) return rowRed;
+    if (pref === PARTNER_PREFERENCE_YES && hasSingles) return rowGreen;
+    if (pref === PARTNER_PREFERENCE_YES && !hasSingles) return rowYellow;
+    return undefined;
+  };
 
   type RowKey = keyof Omit<PartnerAdvocateRow, "followUpRequired">;
 
@@ -420,6 +464,8 @@ async function generatePartnerAdvocatesPdf(
     );
 
     ensureSpace(rowHeight);
+    const shade = getRowShade(row);
+    const rowBg = shade ?? (row.followUpRequired ? rowHighlightBg : undefined);
     page.drawRectangle({
       x: margin,
       y: y - rowHeight,
@@ -427,7 +473,7 @@ async function generatePartnerAdvocatesPdf(
       height: rowHeight,
       borderColor,
       borderWidth: 1,
-      color: row.followUpRequired ? rowHighlightBg : undefined,
+      color: rowBg,
     });
 
     let x = margin;
@@ -647,8 +693,20 @@ export async function POST(req: Request) {
       const dateOfBirth = extractMonthDay(record["birthday"]);
       const followUpRequired = extractFollowUpRequired(record["sd2f734dc1"]);
       const teamId = coerceDisplayText(record["sd0282f4f0"]);
+      const partnerPreference = extractSelectValueId(record[PARTNER_PREFERENCE_FIELD_ID]);
+      const singlesSubmitted = coerceDisplayText(record[SINGLES_SUBMITTED_FIELD_ID]);
 
-      rows.push({ firstName, lastName, city, status, dateOfBirth, followUpRequired, teamId });
+      rows.push({
+        firstName,
+        lastName,
+        city,
+        status,
+        dateOfBirth,
+        followUpRequired,
+        teamId,
+        partnerPreference,
+        singlesSubmitted,
+      });
     }
 
     const pdfBuffer = await generatePartnerAdvocatesPdf(rows);
