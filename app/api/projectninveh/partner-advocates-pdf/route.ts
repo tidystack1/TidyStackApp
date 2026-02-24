@@ -25,6 +25,9 @@ const PARTNER_PREFERENCE_FIELD_ID = "sc11a3c496";
 const SINGLES_SUBMITTED_FIELD_ID = "s8f1e0b31f";
 const PARTNER_PREFERENCE_YES = "yzzsI";
 const PARTNER_PREFERENCE_NO = "ndBgJ";
+/** SmartSuite field id for Date of Birth. Override with PROJECT_NINVEH_SMARTSUITE_PARTNER_ADVOCATES_BIRTHDAY_FIELD_ID if "birthday" key is empty. */
+const BIRTHDAY_FIELD_ID =
+  process.env.PROJECT_NINVEH_SMARTSUITE_PARTNER_ADVOCATES_BIRTHDAY_FIELD_ID ?? "birthday";
 
 type PartnerAdvocateRow = {
   firstName: string;
@@ -117,8 +120,32 @@ function extractAddressCity(value: unknown): string {
   return coerceDisplayText(value);
 }
 
+/** Get a single date string from SmartSuite date field (value, date, on, display_value, etc.). */
+function extractDateString(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && !Number.isNaN(value)) return String(value);
+  if (isRecord(value)) {
+    const candidates = [
+      value["value"],
+      value["date"],
+      value["on"],
+      value["start"],
+      value["start_date"],
+      value["iso"],
+      value["display_value"],
+      value["sys_root"],
+    ];
+    for (const c of candidates) {
+      const s = extractDateString(c);
+      if (s) return s;
+    }
+  }
+  return "";
+}
+
 function extractMonthDay(value: unknown): string {
-  const raw = coerceDisplayText(value);
+  const raw = extractDateString(value) || coerceDisplayText(value);
   if (!raw) return "";
   // Matches ISO date strings like "1990-05-15" or "1990-05-15T..."
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -690,7 +717,7 @@ export async function POST(req: Request) {
       const { firstName, lastName } = extractNameParts(record["s136335e0e"]);
       const city = extractAddressCity(record["sd6a02d6e2"]);
       const status = coerceDisplayText(record["sccc2d121d"]);
-      const dateOfBirth = extractMonthDay(record["birthday"]);
+      const dateOfBirth = extractMonthDay(record[BIRTHDAY_FIELD_ID]);
       const followUpRequired = extractFollowUpRequired(record["sd2f734dc1"]);
       const teamId = coerceDisplayText(record["sd0282f4f0"]);
       const partnerPreference = extractSelectValueId(record[PARTNER_PREFERENCE_FIELD_ID]);
