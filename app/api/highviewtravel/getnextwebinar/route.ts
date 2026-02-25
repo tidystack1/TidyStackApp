@@ -1,5 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
+/** Zoom webinar list item (from /users/me/webinars) */
+interface ZoomWebinar {
+  id: string;
+  start_time: string;
+  join_url?: string;
+  topic?: string;
+  [key: string]: unknown;
+}
+
 /**
  * Get Zoom access token (Server-to-Server OAuth)
  * Uses pre-encoded base64 credentials from env:
@@ -67,6 +76,52 @@ async function getWebinarDetails(token: string, webinarId: string) {
 }
 
 /**
+ * Format ISO date string as "Tuesday 1st July 2027 at 4:34pm"
+ */
+function formatStartTime(isoString: string): string {
+  const d = new Date(isoString);
+  const dayNames = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+  const monthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  const day = d.getDate();
+  const suffix =
+    day === 1 || day === 21 || day === 31
+      ? "st"
+      : day === 2 || day === 22
+        ? "nd"
+        : day === 3 || day === 23
+          ? "rd"
+          : "th";
+  const hours = d.getHours();
+  const mins = d.getMinutes();
+  const ampm = hours >= 12 ? "pm" : "am";
+  const hour12 = hours % 12 || 12;
+  const minsPadded = mins < 10 ? `0${mins}` : `${mins}`;
+  const timeStr = `${hour12}:${minsPadded}${ampm}`;
+  return `${dayNames[d.getDay()]} ${day}${suffix} ${monthNames[d.getMonth()]} ${d.getFullYear()} at ${timeStr}`;
+}
+
+/**
  * POST handler
  */
 export async function POST(req: NextRequest) {
@@ -83,10 +138,10 @@ export async function POST(req: NextRequest) {
 
     const now = new Date();
 
-    const upcoming = webinars
-      .filter((w: any) => new Date(w.start_time) > now)
+    const upcoming = (webinars as ZoomWebinar[])
+      .filter((w) => new Date(w.start_time) > now)
       .sort(
-        (a: any, b: any) =>
+        (a, b) =>
           new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
       );
 
@@ -94,6 +149,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         active: false,
         start_time: null,
+        start_time_formated: null,
         start_date: null,
         join_url: null,
         registration_url: null,
@@ -115,6 +171,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       active: true,
       start_time: next.start_time,
+      start_time_formatted: formatStartTime(next.start_time),
       start_date: startDateObj.toLocaleString("en-US", {
         timeZone: "America/New_York",
         month: "2-digit",
@@ -129,7 +186,7 @@ export async function POST(req: NextRequest) {
       is_tomorrow:
         startDateObj.toDateString() === tomorrow.toDateString() ? 1 : 0,
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error(err);
     return NextResponse.json(
       { error: "Failed to determine next webinar" },
