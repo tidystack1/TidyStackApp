@@ -25,11 +25,33 @@ const PARTNER_PREFERENCE_FIELD_ID = "sc11a3c496";
 const SINGLES_SUBMITTED_FIELD_ID = "s8f1e0b31f";
 const PARTNER_PREFERENCE_YES = "yzzsI";
 const PARTNER_PREFERENCE_NO = "ndBgJ";
+/** Also accept alternate IDs from API: yzzs1 = Yes, ndug = No */
+const PARTNER_PREFERENCE_YES_ALT = "yzzs1";
+const PARTNER_PREFERENCE_NO_ALT = "ndug";
 /** SmartSuite field id for Date of Birth. Override with PROJECT_NINVEH_SMARTSUITE_PARTNER_ADVOCATES_BIRTHDAY_FIELD_ID if "birthday" key is empty. */
 const BIRTHDAY_FIELD_ID =
-  process.env.PROJECT_NINVEH_SMARTSUITE_PARTNER_ADVOCATES_BIRTHDAY_FIELD_ID ?? "birthday";
+  process.env.PROJECT_NINVEH_SMARTSUITE_PARTNER_ADVOCATES_BIRTHDAY_FIELD_ID ??
+  "birthday";
+
+const EMAIL_FIELD_ID = "email";
+const PHONE_NUMBER_FIELD_ID = "phone_number";
+const CATEGORY_TYPE_FIELD_ID = "category_type";
+const PROFESSION_FIELD_ID = "sf4b9aaf6b";
+const SINGLES_NAME_FIELD_ID = "s002a13c45";
+const SINGLES_BIRTHDAY_FIELD_ID = "smvqck9w";
+const SINGLES_LONG_TERM_PLAN_FIELD_ID = "sd505ede9d";
+const FIRST_CREATED_FIELD_ID = "first_created";
 
 type PartnerAdvocateRow = {
+  email: string;
+  phoneNumber: string;
+  categoryType: string;
+  profession: string;
+  partnerPreferenceDisplay: string;
+  singlesName: string;
+  singlesAge: string;
+  singlesLongTermPlan: string;
+  appliedAt: string;
   firstName: string;
   lastName: string;
   city: string;
@@ -37,7 +59,7 @@ type PartnerAdvocateRow = {
   dateOfBirth: string;
   followUpRequired: boolean;
   teamId: string;
-  /** "yzzsI" = Yes have partner, "ndBgJ" = No please pair me */
+  /** "yzzsI" / "yzzs1" = Yes have partner, "ndBgJ" / "ndug" = No please pair me */
   partnerPreference: string;
   /** Singles Submitted as text (number) */
   singlesSubmitted: string;
@@ -153,12 +175,82 @@ function extractMonthDay(value: unknown): string {
     const month = parseInt(match[2], 10);
     const day = parseInt(match[3], 10);
     const monthNames = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
     return `${monthNames[month - 1] ?? match[2]} ${day}`;
   }
   return raw;
+}
+
+/** Compute age in years from SmartSuite date object (e.g. Single's Birthday). */
+function extractAgeFromDate(value: unknown): string {
+  const raw = extractDateString(value);
+  if (!raw) return "";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "";
+  const birthYear = parseInt(match[1], 10);
+  const birthMonth = parseInt(match[2], 10);
+  const birthDay = parseInt(match[3], 10);
+  const now = new Date();
+  let age = now.getFullYear() - birthYear;
+  if (
+    now.getMonth() + 1 < birthMonth ||
+    (now.getMonth() + 1 === birthMonth && now.getDate() < birthDay)
+  ) {
+    age -= 1;
+  }
+  return age >= 0 ? String(age) : "";
+}
+
+/** Join array of strings/objects into one display string (e.g. category_type, long term plan). */
+function extractArrayDisplay(value: unknown): string {
+  if (value == null) return "";
+  if (!Array.isArray(value)) return coerceDisplayText(value);
+  const parts = value.map((v) => coerceDisplayText(v)).filter(Boolean);
+  return parts.join(", ");
+}
+
+/** Singles Name field: array of objects with first_name, last_name, sys_root. */
+function extractSinglesNameDisplay(value: unknown): string {
+  if (value == null) return "";
+  if (!Array.isArray(value)) return coerceDisplayText(value);
+  const names = value.map((v) => coerceDisplayText(v)).filter(Boolean);
+  return names.join(", ");
+}
+
+/** Format first_created / applied at as readable date. */
+function formatAppliedAt(value: unknown): string {
+  const raw = extractDateString(value);
+  if (!raw) return "";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return raw;
+  const [, y, m, d] = match;
+  const monthNames = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  return `${monthNames[parseInt(m ?? "1", 10) - 1]} ${d}, ${y}`;
 }
 
 function extractFollowUpRequired(value: unknown): boolean {
@@ -338,29 +430,43 @@ async function generatePartnerAdvocatesPdf(
   const rowRed = rgb(1, 0.82, 0.82);
 
   /** No → red (preference). Yes + singles ≥ 1 → green. Yes + singles < 1 → yellow. */
+  const isNoPartnerPreference = (pref: string) =>
+    pref === PARTNER_PREFERENCE_NO || pref === PARTNER_PREFERENCE_NO_ALT;
+  const isYesPartnerPreference = (pref: string) =>
+    pref === PARTNER_PREFERENCE_YES || pref === PARTNER_PREFERENCE_YES_ALT;
   const getRowShade = (row: PartnerAdvocateRow) => {
     const pref = row.partnerPreference;
     const raw = (row.singlesSubmitted ?? "").trim();
     const num = raw === "" ? NaN : parseInt(raw, 10);
     const hasSingles = !Number.isNaN(num) && num >= 1;
-    if (pref === PARTNER_PREFERENCE_NO) return rowRed;
-    if (pref === PARTNER_PREFERENCE_YES && hasSingles) return rowGreen;
-    if (pref === PARTNER_PREFERENCE_YES && !hasSingles) return rowYellow;
+    if (isNoPartnerPreference(pref)) return rowRed;
+    if (isYesPartnerPreference(pref) && hasSingles) return rowGreen;
+    if (isYesPartnerPreference(pref) && !hasSingles) return rowYellow;
     return undefined;
   };
 
   type RowKey = keyof Omit<PartnerAdvocateRow, "followUpRequired">;
 
   const columns: Array<{
-    key: RowKey | "followUpRequired";
+    key: RowKey | "followUpRequired" | "rowNum";
     label: string;
     width: number;
   }> = [
-    { key: "firstName", label: "First Name", width: 70 },
-    { key: "lastName", label: "Last Name", width: 70 },
-    { key: "city", label: "City", width: 90 },
-    { key: "status", label: "Partner Advocate Status", width: 130 },
-    { key: "dateOfBirth", label: "Date of Birth", width: 65 },
+    { key: "rowNum", label: "", width: 20 },
+    { key: "firstName", label: "First Name", width: 36 },
+    { key: "lastName", label: "Last Name", width: 36 },
+    { key: "appliedAt", label: "Application Date", width: 33 },
+    { key: "status", label: "Partner Advocate Status", width: 72 },
+    { key: "city", label: "City", width: 36 },
+    { key: "email", label: "Email", width: 38 },
+    { key: "phoneNumber", label: "Phone Number", width: 36 },
+    { key: "categoryType", label: "Your Category Type", width: 38 },
+    { key: "profession", label: "Profession", width: 33 },
+    { key: "partnerPreferenceDisplay", label: "Partner up with?", width: 40 },
+    { key: "singlesName", label: "Singles Name", width: 40 },
+    { key: "singlesAge", label: "Singles Age", width: 20 },
+    { key: "singlesLongTermPlan", label: "Long Term Plan", width: 40 },
+    { key: "dateOfBirth", label: "Date of Birth", width: 33 },
   ];
 
   const totalWidth = columns.reduce((sum, c) => sum + c.width, 0);
@@ -470,9 +576,11 @@ async function generatePartnerAdvocatesPdf(
     y -= groupHeight;
   };
 
-  const drawDataRow = (row: PartnerAdvocateRow) => {
+  const drawDataRow = (row: PartnerAdvocateRow, rowIndex: number) => {
     const getCellText = (key: (typeof columns)[number]["key"]): string => {
-      if (key === "followUpRequired") return row.followUpRequired ? "Yes" : "No";
+      if (key === "rowNum") return String(rowIndex);
+      if (key === "followUpRequired")
+        return row.followUpRequired ? "Yes" : "No";
       return (row[key as RowKey] ?? "") as string;
     };
 
@@ -506,22 +614,37 @@ async function generatePartnerAdvocatesPdf(
     let x = margin;
     for (let i = 0; i < columns.length; i++) {
       const col = columns[i];
+      const cellText = getCellText(col.key);
       const lines = wrapTextToWidth({
-        text: getCellText(col.key),
+        text: cellText,
         font,
         fontSize,
         maxWidth: col.width - cellPaddingX * 2,
       });
-      let textY = y - cellPaddingY - fontSize;
-      for (const line of lines) {
+      if (col.key === "rowNum") {
+        const line = lines[0] ?? "";
+        const textWidth = font.widthOfTextAtSize(line, fontSize);
+        const centerX = x + col.width / 2 - textWidth / 2;
+        const centerY = y - rowHeight / 2 - fontSize / 2;
         page.drawText(line, {
-          x: x + cellPaddingX,
-          y: textY,
+          x: centerX,
+          y: centerY,
           size: fontSize,
           font,
           color: rgb(0, 0, 0),
         });
-        textY -= lineHeight;
+      } else {
+        let textY = y - cellPaddingY - fontSize;
+        for (const line of lines) {
+          page.drawText(line, {
+            x: x + cellPaddingX,
+            y: textY,
+            size: fontSize,
+            font,
+            color: rgb(0, 0, 0),
+          });
+          textY -= lineHeight;
+        }
       }
       if (i < columns.length - 1) {
         page.drawLine({
@@ -553,15 +676,23 @@ async function generatePartnerAdvocatesPdf(
     return a.localeCompare(b, "en", { sensitivity: "base" });
   });
 
+  let rowNumber = 0;
   for (const groupKey of sortedGroupKeys) {
     drawGroupHeader(groupKey);
     const groupRows = groups.get(groupKey) ?? [];
     groupRows.sort((a, b) => {
-      const last = a.lastName.localeCompare(b.lastName, "en", { sensitivity: "base" });
+      const last = a.lastName.localeCompare(b.lastName, "en", {
+        sensitivity: "base",
+      });
       if (last !== 0) return last;
-      return a.firstName.localeCompare(b.firstName, "en", { sensitivity: "base" });
+      return a.firstName.localeCompare(b.firstName, "en", {
+        sensitivity: "base",
+      });
     });
-    for (const row of groupRows) drawDataRow(row);
+    for (const row of groupRows) {
+      rowNumber += 1;
+      drawDataRow(row, rowNumber);
+    }
   }
 
   const bytes = await pdfDoc.save();
@@ -720,10 +851,44 @@ export async function POST(req: Request) {
       const dateOfBirth = extractMonthDay(record[BIRTHDAY_FIELD_ID]);
       const followUpRequired = extractFollowUpRequired(record["sd2f734dc1"]);
       const teamId = coerceDisplayText(record["sd0282f4f0"]);
-      const partnerPreference = extractSelectValueId(record[PARTNER_PREFERENCE_FIELD_ID]);
-      const singlesSubmitted = coerceDisplayText(record[SINGLES_SUBMITTED_FIELD_ID]);
+      const partnerPreference = extractSelectValueId(
+        record[PARTNER_PREFERENCE_FIELD_ID],
+      );
+      const singlesSubmitted = coerceDisplayText(
+        record[SINGLES_SUBMITTED_FIELD_ID],
+      );
+
+      const email = coerceDisplayText(record[EMAIL_FIELD_ID]);
+      const phoneNumber = coerceDisplayText(record[PHONE_NUMBER_FIELD_ID]);
+      const categoryType = extractArrayDisplay(record[CATEGORY_TYPE_FIELD_ID]);
+      const profession = coerceDisplayText(record[PROFESSION_FIELD_ID]);
+      const partnerPreferenceDisplay =
+        partnerPreference === PARTNER_PREFERENCE_YES ||
+        partnerPreference === PARTNER_PREFERENCE_YES_ALT
+          ? "Yes"
+          : partnerPreference === PARTNER_PREFERENCE_NO ||
+              partnerPreference === PARTNER_PREFERENCE_NO_ALT
+            ? "No"
+            : "";
+      const singlesName = extractSinglesNameDisplay(
+        record[SINGLES_NAME_FIELD_ID],
+      );
+      const singlesAge = extractAgeFromDate(record[SINGLES_BIRTHDAY_FIELD_ID]);
+      const singlesLongTermPlan = extractArrayDisplay(
+        record[SINGLES_LONG_TERM_PLAN_FIELD_ID],
+      );
+      const appliedAt = formatAppliedAt(record[FIRST_CREATED_FIELD_ID]);
 
       rows.push({
+        email,
+        phoneNumber,
+        categoryType,
+        profession,
+        partnerPreferenceDisplay,
+        singlesName,
+        singlesAge,
+        singlesLongTermPlan,
+        appliedAt,
         firstName,
         lastName,
         city,
