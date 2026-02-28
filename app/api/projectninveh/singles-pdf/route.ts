@@ -7,6 +7,14 @@ import {
   rgb,
 } from "pdf-lib";
 
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+}
+
 export const runtime = "nodejs";
 
 const SMARTSUITE_API_BASE = "https://app.smartsuite.com/api/v1";
@@ -681,6 +689,13 @@ async function patchSmartSuiteRecordFields({
   }
 }
 
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders(),
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -702,7 +717,7 @@ export async function POST(req: NextRequest) {
     if ((table ?? "").toLowerCase() !== "singles") {
       return NextResponse.json(
         { error: "Unsupported table; only 'Singles' is supported" },
-        { status: 400 },
+        { status: 400, headers: corsHeaders() },
       );
     }
 
@@ -882,7 +897,7 @@ export async function POST(req: NextRequest) {
         filename,
         pdfSizeBytes: pdfBuffer.length,
       },
-      { status: 200 },
+      { status: 200, headers: corsHeaders() },
     );
   } catch (error) {
     console.error("[PROJECT_NINVEH] singles-pdf error:", error);
@@ -891,7 +906,7 @@ export async function POST(req: NextRequest) {
         error: "Failed to generate/upload singles PDF",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 },
+      { status: 500, headers: corsHeaders() },
     );
   }
 }
