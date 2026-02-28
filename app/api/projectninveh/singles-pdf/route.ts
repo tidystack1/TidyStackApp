@@ -683,18 +683,7 @@ async function patchSmartSuiteRecordFields({
 
 export async function POST(req: NextRequest) {
   try {
-    const expectedPassword = requireEnv("PROJECT_NINVEH_API_PASSWORD").trim();
-
     const body = await req.json();
-    const password = isRecord(body)
-      ? coerceString(
-          (body as Record<string, unknown>).password ??
-            (body as Record<string, unknown>).Password,
-        )
-      : undefined;
-    if ((password ?? "").trim() !== expectedPassword) {
-      return NextResponse.json({ error: "Invalid password" }, { status: 401 });
-    }
 
     // Parse webhook parameters: accept either capitalized or camelCase keys
     const table = isRecord(body)
