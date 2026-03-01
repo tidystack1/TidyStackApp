@@ -25,6 +25,7 @@ type CommitteeExpandedRow = {
   firstName: string;
   lastName: string;
   city: string;
+  role: string;
   committeeFirstChoice: string;
   committeeSecondChoice: string;
   status: string;
@@ -325,6 +326,7 @@ async function generateCommitteePdf(
     { key: "firstName", label: "First Name", width: 60 },
     { key: "lastName", label: "Last Name", width: 60 },
     { key: "city", label: "City", width: 75 },
+    { key: "role", label: "Role", width: 70 },
     {
       key: "committeeFirstChoice",
       label: "Committee First Choice",
@@ -687,6 +689,7 @@ export async function POST(req: Request) {
 
       const { firstName, lastName } = extractNameParts(record["s136335e0e"]);
       const city = extractAddressCity(record["sd6a02d6e2"]);
+      const role = coerceDisplayText(record["sa689248fd"]);
       const committeeFirstChoice = coerceDisplayText(record["s4e5e50f83"]);
       const committeeSecondChoice = coerceDisplayText(record["s0nw2wqi"]);
       const status = coerceDisplayText(record["sccc2d121d"]);
@@ -697,6 +700,7 @@ export async function POST(req: Request) {
           firstName,
           lastName,
           city,
+          role,
           committeeFirstChoice,
           committeeSecondChoice,
           status,
@@ -710,6 +714,7 @@ export async function POST(req: Request) {
           firstName,
           lastName,
           city,
+          role,
           committeeFirstChoice,
           committeeSecondChoice,
           status,
