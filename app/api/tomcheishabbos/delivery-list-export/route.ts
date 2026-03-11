@@ -23,6 +23,7 @@ const WINE_BOTTLES_FIELD_ID = "s6c00bb5b1";
 const REPORTS_TABLE_ID = "69af983fd4df284d80aa4f6b";
 const REPORTS_RECORD_ID = "69afea9689052b7b2c10cdca";
 const REPORTS_FILE_FIELD_ID = "s70d15f822";
+const REPORTS_LAST_CREATED_FIELD_ID = "s1c5f28ecd";
 
 type SmartSuiteListResponse = {
   items?: unknown[];
@@ -593,6 +594,21 @@ export async function POST(req: Request) {
       filename,
       contentType: "application/pdf",
     });
+
+    await fetch(
+      `${SMARTSUITE_API_BASE}/applications/${REPORTS_TABLE_ID}/records/${REPORTS_RECORD_ID}/`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          "ACCOUNT-ID": accountId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          [REPORTS_LAST_CREATED_FIELD_ID]: new Date().toISOString(),
+        }),
+      },
+    );
 
     return NextResponse.json(
       {
