@@ -595,6 +595,8 @@ export async function POST(req: Request) {
       contentType: "application/pdf",
     });
 
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
     await fetch(
       `${SMARTSUITE_API_BASE}/applications/${REPORTS_TABLE_ID}/records/${REPORTS_RECORD_ID}/`,
       {
