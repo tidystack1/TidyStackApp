@@ -16,6 +16,8 @@ const CUSTOMER_DELIVERY_ID_FIELD_ID = "s64a81a706";
 const CARDS_TOTAL_FIELD_ID = "s83940c544";
 const CARDS_ACTUAL_FIELD_ID = "s649361439";
 const FIRST_NAME_FIELD_ID = "sbrcclv0";
+const LAST_NAME_FIELD_ID = "s305be42b5";
+const ADDRESS_FIELD_ID = "s01b42a1e2";
 const WINE_BOTTLES_FIELD_ID = "s6c00bb5b1";
 
 // Target report record / field
@@ -33,12 +35,13 @@ type SmartSuiteListResponse = {
 };
 
 type DeliveryRow = {
-  packageTitle: string;
   customerDeliveryId: string;
+  wineBottles: string;
+  firstName: string;
+  lastName: string;
+  address: string;
   cardsTotal: string;
   cardsActual: string;
-  firstName: string;
-  wineBottles: string;
 };
 
 function corsHeaders() {
@@ -242,22 +245,24 @@ function mapToDeliveryRows(rawRecords: unknown[]): DeliveryRow[] {
   for (const record of rawRecords) {
     if (!isRecord(record)) continue;
 
-    const packageTitle = coerceDisplayText(record["title"]);
     const customerDeliveryId = coerceDisplayText(
       record[CUSTOMER_DELIVERY_ID_FIELD_ID],
     );
+    const wineBottles = coerceDisplayText(record[WINE_BOTTLES_FIELD_ID]);
+    const firstName = coerceDisplayText(record[FIRST_NAME_FIELD_ID]);
+    const lastName = coerceDisplayText(record[LAST_NAME_FIELD_ID]);
+    const address = coerceDisplayText(record[ADDRESS_FIELD_ID]);
     const cardsTotal = coerceDisplayText(record[CARDS_TOTAL_FIELD_ID]);
     const cardsActual = coerceDisplayText(record[CARDS_ACTUAL_FIELD_ID]);
-    const firstName = coerceDisplayText(record[FIRST_NAME_FIELD_ID]);
-    const wineBottles = coerceDisplayText(record[WINE_BOTTLES_FIELD_ID]);
 
     rows.push({
-      packageTitle,
       customerDeliveryId,
+      wineBottles,
+      firstName,
+      lastName,
+      address,
       cardsTotal,
       cardsActual,
-      firstName,
-      wineBottles,
     });
   }
 
@@ -288,12 +293,13 @@ async function generatePesachDeliveryPdf(
     label: string;
     width: number;
   }> = [
-    { key: "packageTitle", label: "Package", width: 110 },
-    { key: "customerDeliveryId", label: "Customer Delivery ID", width: 85 },
-    { key: "cardsTotal", label: "Cards Total", width: 65 },
-    { key: "cardsActual", label: "Cards Actual", width: 65 },
-    { key: "firstName", label: "First Name", width: 110 },
-    { key: "wineBottles", label: "Wine Bottles", width: 80 },
+    { key: "customerDeliveryId", label: "Customer ID", width: 55 },
+    { key: "wineBottles", label: "Wine Bottles Total", width: 55 },
+    { key: "firstName", label: "First Name", width: 75 },
+    { key: "lastName", label: "Last Name", width: 75 },
+    { key: "address", label: "Address", width: 170 },
+    { key: "cardsTotal", label: "Cards Total", width: 57 },
+    { key: "cardsActual", label: "Cards Actual", width: 66 },
   ];
 
   const totalWidth = columns.reduce((sum, c) => sum + c.width, 0);
