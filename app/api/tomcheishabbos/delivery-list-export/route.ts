@@ -543,21 +543,24 @@ export async function POST(req: Request) {
     const accountId = requireEnv("TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID");
 
     const body = await req.json().catch(() => ({}));
-    const yearRaw =
-      (body && typeof body === "object" && "year" in body
-        ? (body as { year?: unknown }).year
-        : undefined) ?? undefined;
+    const packageDateRaw =
+      body && typeof body === "object" && "PackageDate" in body
+        ? (body as { PackageDate?: unknown }).PackageDate
+        : undefined;
 
-    const yearNum =
-      typeof yearRaw === "number"
-        ? yearRaw
-        : typeof yearRaw === "string"
-          ? parseInt(yearRaw, 10)
-          : NaN;
-
-    if (!Number.isFinite(yearNum) || String(yearNum).length !== 4) {
+    if (!packageDateRaw || typeof packageDateRaw !== "string") {
       return NextResponse.json(
-        { error: "Invalid or missing 'year' in request body" },
+        { error: "Invalid or missing 'PackageDate' in request body" },
+        { status: 400, headers: corsHeaders() },
+      );
+    }
+
+    const parsedDate = new Date(packageDateRaw);
+    const yearNum = parsedDate.getFullYear();
+
+    if (isNaN(yearNum) || String(yearNum).length !== 4) {
+      return NextResponse.json(
+        { error: "'PackageDate' is not a valid date" },
         { status: 400, headers: corsHeaders() },
       );
     }
