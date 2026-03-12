@@ -257,7 +257,12 @@ function mapToCurrentPersons(rawRecords: unknown[]): PersonRecord[] {
       for (const row of pesachCardsRaw as unknown[]) {
         if (Array.isArray(row)) {
           for (const cell of row as unknown[]) {
-            if (cell === true || cell === "true" || cell === 1 || cell === "1") {
+            if (
+              cell === true ||
+              cell === "true" ||
+              cell === 1 ||
+              cell === "1"
+            ) {
               hasPesachCards = true;
               break;
             }
@@ -460,15 +465,15 @@ async function generateComparisonPdf(
     y -= 18;
   };
 
-  const drawMetrics = (rows: { lastYear: boolean; thisYear: boolean; both: boolean }[]) => {
+  const drawMetrics = (
+    rows: { lastYear: boolean; thisYear: boolean; both: boolean }[],
+  ) => {
     const total = rows.length;
     let lastYearOnly = 0;
     let thisYearOnly = 0;
-    let both = 0;
 
     for (const r of rows) {
-      if (r.both) both += 1;
-      else if (r.lastYear && !r.thisYear) lastYearOnly += 1;
+      if (r.lastYear && !r.thisYear) lastYearOnly += 1;
       else if (r.thisYear && !r.lastYear) thisYearOnly += 1;
     }
 
@@ -495,17 +500,16 @@ async function generateComparisonPdf(
     };
 
     drawMetric("Total", total, baseX);
-    drawMetric("Last Year Only", lastYearOnly, baseX + gapX);
-    drawMetric("This Year Only", thisYearOnly, baseX + 2 * gapX);
-    drawMetric("Both Years", both, baseX + 3 * gapX);
+    drawMetric("2025 Only", lastYearOnly, baseX + gapX);
+    drawMetric("2026 Only", thisYearOnly, baseX + 2 * gapX);
 
     y -= 26;
   };
 
   const drawTableHeader = (label: string) => {
     const colIndexWidth = 30;
-    const colLabelWidth = 230;
-    const colFlagWidth = 70;
+    const colLabelWidth = 210;
+    const colFlagWidth = 90;
     const headerHeight = 18;
 
     ensureSpace(headerHeight + lineHeight);
@@ -513,7 +517,7 @@ async function generateComparisonPdf(
     page.drawRectangle({
       x: margin,
       y: y - headerHeight,
-      width: colIndexWidth + colLabelWidth + 3 * colFlagWidth,
+      width: colIndexWidth + colLabelWidth + 2 * colFlagWidth,
       height: headerHeight,
       color: rgb(0.88, 0.93, 0.99),
       borderColor: rgb(0.6, 0.7, 0.85),
@@ -539,7 +543,7 @@ async function generateComparisonPdf(
     });
 
     x = margin + colIndexWidth + colLabelWidth + 4;
-    page.drawText("Last Year", {
+    page.drawText("Received in 2025", {
       x,
       y: y - 12,
       size: 9,
@@ -548,16 +552,7 @@ async function generateComparisonPdf(
     });
 
     x += colFlagWidth;
-    page.drawText("This Year", {
-      x,
-      y: y - 12,
-      size: 9,
-      font: bold,
-      color: rgb(0.05, 0.25, 0.55),
-    });
-
-    x += colFlagWidth;
-    page.drawText("Both", {
+    page.drawText("Received in 2026", {
       x,
       y: y - 12,
       size: 9,
@@ -577,8 +572,8 @@ async function generateComparisonPdf(
     }[],
   ) => {
     const colIndexWidth = 30;
-    const colLabelWidth = 230;
-    const colFlagWidth = 70;
+    const colLabelWidth = 210;
+    const colFlagWidth = 90;
 
     rows.forEach((row, index) => {
       ensureSpace(lineHeight + 6);
@@ -591,7 +586,7 @@ async function generateComparisonPdf(
         page.drawRectangle({
           x: margin,
           y: topY - rowHeight,
-          width: colIndexWidth + colLabelWidth + 3 * colFlagWidth,
+          width: colIndexWidth + colLabelWidth + 2 * colFlagWidth,
           height: rowHeight,
           color: rgb(0.96, 0.98, 1),
         });
@@ -620,7 +615,7 @@ async function generateComparisonPdf(
       // Use plain ASCII so WinAnsi encoding works everywhere
       const tick = "X";
 
-      x = margin + colLabelWidth + colFlagWidth / 2;
+      x = margin + colIndexWidth + colLabelWidth + colFlagWidth / 2;
       if (row.lastYear) {
         page.drawText(tick, {
           x,
@@ -633,17 +628,6 @@ async function generateComparisonPdf(
 
       x += colFlagWidth;
       if (row.thisYear) {
-        page.drawText(tick, {
-          x,
-          y: rowY,
-          size: 10,
-          font,
-          color: rgb(0, 0, 0),
-        });
-      }
-
-      x += colFlagWidth;
-      if (row.both) {
         page.drawText(tick, {
           x,
           y: rowY,

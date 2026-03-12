@@ -313,16 +313,17 @@ async function generatePesachDeliveryPdf(
   const headerBg = rgb(0.95, 0.95, 0.95);
 
   const columns: Array<{
-    key: keyof DeliveryRow;
+    key: keyof DeliveryRow | "#";
     label: string;
     width: number;
   }> = [
     // Widths chosen so that totalWidth === maxWidth (553)
+    { key: "#", label: "#", width: 25 },
     { key: "customerDeliveryId", label: "ID#", width: 50 },
     { key: "wineBottles", label: "Wine Bottles Total", width: 50 },
     { key: "firstName", label: "First Name", width: 70 },
     { key: "lastName", label: "Last Name", width: 70 },
-    { key: "address", label: "Address", width: 163 },
+    { key: "address", label: "Address", width: 138 },
     { key: "cardsTotal", label: "Cards Total", width: 55 },
     { key: "cardsActual", label: "Cards Actual", width: 60 },
     // Repeat ID column at end
@@ -414,10 +415,11 @@ async function generatePesachDeliveryPdf(
     y -= headerHeight;
   };
 
-  const drawDataRow = (row: DeliveryRow) => {
+  const drawDataRow = (row: DeliveryRow, rowNum: number) => {
     const maxLineCounts = columns.map((col) => {
+      const text = col.key === "#" ? String(rowNum) : row[col.key] ?? "";
       const lines = wrapTextToWidth({
-        text: row[col.key] ?? "",
+        text,
         font,
         fontSize,
         maxWidth: col.width - cellPaddingX * 2,
@@ -444,8 +446,9 @@ async function generatePesachDeliveryPdf(
     let x = margin;
     for (let i = 0; i < columns.length; i++) {
       const col = columns[i];
+      const text = col.key === "#" ? String(rowNum) : row[col.key] ?? "";
       const lines = wrapTextToWidth({
-        text: row[col.key] ?? "",
+        text,
         font,
         fontSize,
         maxWidth: col.width - cellPaddingX * 2,
@@ -477,8 +480,8 @@ async function generatePesachDeliveryPdf(
   drawHeader();
   drawTableHeader();
 
-  for (const row of rows) {
-    drawDataRow(row);
+  for (let i = 0; i < rows.length; i++) {
+    drawDataRow(rows[i], i + 1);
   }
 
   const bytes = await pdfDoc.save();
