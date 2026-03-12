@@ -19,6 +19,7 @@ const FIRST_NAME_FIELD_ID = "sbrcclv0";
 const LAST_NAME_FIELD_ID = "s305be42b5";
 const ADDRESS_FIELD_ID = "s01b42a1e2";
 const WINE_BOTTLES_FIELD_ID = "s6c00bb5b1";
+const PESACH_CARDS_LOOKUP_FIELD_ID = "sff36bf980";
 
 // Target report record / field
 // Table id provided for the "Reports" app
@@ -245,6 +246,29 @@ function mapToDeliveryRows(rawRecords: unknown[]): DeliveryRow[] {
   for (const record of rawRecords) {
     if (!isRecord(record)) continue;
 
+    // Only include records where Pesach Cards? lookup has at least one truthy value
+    const pesachCardsRaw = record[PESACH_CARDS_LOOKUP_FIELD_ID];
+    let hasPesachCards = false;
+    if (Array.isArray(pesachCardsRaw)) {
+      for (const row of pesachCardsRaw as unknown[]) {
+        if (Array.isArray(row)) {
+          for (const cell of row as unknown[]) {
+            if (
+              cell === true ||
+              cell === "true" ||
+              cell === 1 ||
+              cell === "1"
+            ) {
+              hasPesachCards = true;
+              break;
+            }
+          }
+        }
+        if (hasPesachCards) break;
+      }
+    }
+    if (!hasPesachCards) continue;
+
     const customerDeliveryId = coerceDisplayText(
       record[CUSTOMER_DELIVERY_ID_FIELD_ID],
     );
@@ -293,13 +317,16 @@ async function generatePesachDeliveryPdf(
     label: string;
     width: number;
   }> = [
-    { key: "customerDeliveryId", label: "Customer ID", width: 55 },
-    { key: "wineBottles", label: "Wine Bottles Total", width: 55 },
-    { key: "firstName", label: "First Name", width: 75 },
-    { key: "lastName", label: "Last Name", width: 75 },
-    { key: "address", label: "Address", width: 170 },
-    { key: "cardsTotal", label: "Cards Total", width: 57 },
-    { key: "cardsActual", label: "Cards Actual", width: 66 },
+    // Widths chosen so that totalWidth === maxWidth (553)
+    { key: "customerDeliveryId", label: "ID#", width: 50 },
+    { key: "wineBottles", label: "Wine Bottles Total", width: 50 },
+    { key: "firstName", label: "First Name", width: 70 },
+    { key: "lastName", label: "Last Name", width: 70 },
+    { key: "address", label: "Address", width: 163 },
+    { key: "cardsTotal", label: "Cards Total 2026", width: 55 },
+    { key: "cardsActual", label: "Cards Actual 2026", width: 60 },
+    // Repeat ID column at end
+    { key: "customerDeliveryId", label: "ID#", width: 35 },
   ];
 
   const totalWidth = columns.reduce((sum, c) => sum + c.width, 0);

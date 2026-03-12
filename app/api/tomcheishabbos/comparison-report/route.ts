@@ -249,6 +249,25 @@ function mapToCurrentPersons(rawRecords: unknown[]): PersonRecord[] {
   for (const record of rawRecords) {
     if (!isRecord(record)) continue;
 
+    // Only include records where the "Pesach Cards?" lookup (sff36bf980)
+    // has at least one truthy value.
+    const pesachCardsRaw = record["sff36bf980"];
+    let hasPesachCards = false;
+    if (Array.isArray(pesachCardsRaw)) {
+      for (const row of pesachCardsRaw as unknown[]) {
+        if (Array.isArray(row)) {
+          for (const cell of row as unknown[]) {
+            if (cell === true || cell === "true" || cell === 1 || cell === "1") {
+              hasPesachCards = true;
+              break;
+            }
+          }
+        }
+        if (hasPesachCards) break;
+      }
+    }
+    if (!hasPesachCards) continue;
+
     const id = typeof record["id"] === "string" ? record["id"] : "";
     const firstName = coerceDisplayText(record[CURRENT_FIRST_NAME_FIELD_ID]);
     const lastName = coerceDisplayText(record[CURRENT_LAST_NAME_FIELD_ID]);
@@ -484,7 +503,8 @@ async function generateComparisonPdf(
   };
 
   const drawTableHeader = (label: string) => {
-    const colLabelWidth = 260;
+    const colIndexWidth = 30;
+    const colLabelWidth = 230;
     const colFlagWidth = 70;
     const headerHeight = 18;
 
@@ -493,7 +513,7 @@ async function generateComparisonPdf(
     page.drawRectangle({
       x: margin,
       y: y - headerHeight,
-      width: colLabelWidth + 3 * colFlagWidth,
+      width: colIndexWidth + colLabelWidth + 3 * colFlagWidth,
       height: headerHeight,
       color: rgb(0.88, 0.93, 0.99),
       borderColor: rgb(0.6, 0.7, 0.85),
@@ -501,6 +521,15 @@ async function generateComparisonPdf(
     });
 
     let x = margin + 4;
+    page.drawText("#", {
+      x,
+      y: y - 12,
+      size: 9,
+      font: bold,
+      color: rgb(0.05, 0.25, 0.55),
+    });
+
+    x = margin + colIndexWidth + 4;
     page.drawText(label, {
       x,
       y: y - 12,
@@ -509,7 +538,7 @@ async function generateComparisonPdf(
       color: rgb(0.05, 0.25, 0.55),
     });
 
-    x = margin + colLabelWidth + 4;
+    x = margin + colIndexWidth + colLabelWidth + 4;
     page.drawText("Last Year", {
       x,
       y: y - 12,
@@ -547,7 +576,8 @@ async function generateComparisonPdf(
       both: boolean;
     }[],
   ) => {
-    const colLabelWidth = 260;
+    const colIndexWidth = 30;
+    const colLabelWidth = 230;
     const colFlagWidth = 70;
 
     rows.forEach((row, index) => {
@@ -561,13 +591,23 @@ async function generateComparisonPdf(
         page.drawRectangle({
           x: margin,
           y: topY - rowHeight,
-          width: colLabelWidth + 3 * colFlagWidth,
+          width: colIndexWidth + colLabelWidth + 3 * colFlagWidth,
           height: rowHeight,
           color: rgb(0.96, 0.98, 1),
         });
       }
 
+      // Row number
       let x = margin + 4;
+      page.drawText(String(index + 1), {
+        x,
+        y: rowY,
+        size: 9,
+        font,
+        color: rgb(0.1, 0.15, 0.25),
+      });
+
+      x = margin + colIndexWidth + 4;
       page.drawText(row.value, {
         x,
         y: rowY,
