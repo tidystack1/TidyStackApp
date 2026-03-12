@@ -323,8 +323,8 @@ async function generatePesachDeliveryPdf(
     { key: "firstName", label: "First Name", width: 70 },
     { key: "lastName", label: "Last Name", width: 70 },
     { key: "address", label: "Address", width: 163 },
-    { key: "cardsTotal", label: "Cards Total 2026", width: 55 },
-    { key: "cardsActual", label: "Cards Actual 2026", width: 60 },
+    { key: "cardsTotal", label: "Cards Total", width: 55 },
+    { key: "cardsActual", label: "Cards Actual", width: 60 },
     // Repeat ID column at end
     { key: "customerDeliveryId", label: "ID#", width: 35 },
   ];
