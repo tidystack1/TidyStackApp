@@ -330,6 +330,14 @@ async function generatePesachDeliveryPdf(
       font,
       color: rgb(0.2, 0.2, 0.2),
     });
+    y -= 14;
+    page.drawText(`Total records: ${rows.length}`, {
+      x: margin,
+      y,
+      size: 9,
+      font,
+      color: rgb(0.2, 0.2, 0.2),
+    });
     y -= 16;
   };
 
