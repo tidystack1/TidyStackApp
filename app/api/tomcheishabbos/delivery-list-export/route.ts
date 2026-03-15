@@ -12,20 +12,20 @@ const PACKAGE_TYPE_PESACH_VALUE_ID = "nuNTD";
 const PACKAGE_YEAR_FIELD_ID = "s008955138";
 
 // Fields to include in the report
-const CUSTOMER_DELIVERY_ID_FIELD_ID = "s64a81a706";
+const ID_FIELD_ID = "s1c36a8396";
 const CARDS_TOTAL_FIELD_ID = "s83940c544";
 const CARDS_ACTUAL_FIELD_ID = "s649361439";
 const FIRST_NAME_FIELD_ID = "sbrcclv0";
 const LAST_NAME_FIELD_ID = "s305be42b5";
 const ADDRESS_FIELD_ID = "s01b42a1e2";
 const WINE_BOTTLES_FIELD_ID = "s6c00bb5b1";
-const PESACH_CARDS_LOOKUP_FIELD_ID = "sff36bf980";
 
 // Target report record / field
 // Table id provided for the "Reports" app
 const REPORTS_TABLE_ID = "69af983fd4df284d80aa4f6b";
 const REPORTS_RECORD_ID = "69afea9689052b7b2c10cdca";
 const REPORTS_FILE_FIELD_ID = "s70d15f822";
+const REPORTS_FILE_FIELD_ID_BY_ID = "sb447c8ca2";
 const REPORTS_LAST_CREATED_FIELD_ID = "s1c5f28ecd";
 
 type SmartSuiteListResponse = {
@@ -36,7 +36,7 @@ type SmartSuiteListResponse = {
 };
 
 type DeliveryRow = {
-  customerDeliveryId: string;
+  id: string;
   wineBottles: string;
   firstName: string;
   lastName: string;
@@ -246,32 +246,7 @@ function mapToDeliveryRows(rawRecords: unknown[]): DeliveryRow[] {
   for (const record of rawRecords) {
     if (!isRecord(record)) continue;
 
-    // Only include records where Pesach Cards? lookup has at least one truthy value
-    const pesachCardsRaw = record[PESACH_CARDS_LOOKUP_FIELD_ID];
-    let hasPesachCards = false;
-    if (Array.isArray(pesachCardsRaw)) {
-      for (const row of pesachCardsRaw as unknown[]) {
-        if (Array.isArray(row)) {
-          for (const cell of row as unknown[]) {
-            if (
-              cell === true ||
-              cell === "true" ||
-              cell === 1 ||
-              cell === "1"
-            ) {
-              hasPesachCards = true;
-              break;
-            }
-          }
-        }
-        if (hasPesachCards) break;
-      }
-    }
-    if (!hasPesachCards) continue;
-
-    const customerDeliveryId = coerceDisplayText(
-      record[CUSTOMER_DELIVERY_ID_FIELD_ID],
-    );
+    const id = coerceDisplayText(record[ID_FIELD_ID]);
     const wineBottles = coerceDisplayText(record[WINE_BOTTLES_FIELD_ID]);
     const firstName = coerceDisplayText(record[FIRST_NAME_FIELD_ID]);
     const lastName = coerceDisplayText(record[LAST_NAME_FIELD_ID]);
@@ -280,7 +255,7 @@ function mapToDeliveryRows(rawRecords: unknown[]): DeliveryRow[] {
     const cardsActual = coerceDisplayText(record[CARDS_ACTUAL_FIELD_ID]);
 
     rows.push({
-      customerDeliveryId,
+      id,
       wineBottles,
       firstName,
       lastName,
@@ -313,21 +288,18 @@ async function generatePesachDeliveryPdf(
   const headerBg = rgb(0.95, 0.95, 0.95);
 
   const columns: Array<{
-    key: keyof DeliveryRow | "#";
+    key: keyof DeliveryRow;
     label: string;
     width: number;
   }> = [
-    // Widths chosen so that totalWidth === maxWidth (553)
-    { key: "#", label: "#", width: 25 },
-    { key: "customerDeliveryId", label: "ID#", width: 50 },
+    { key: "id", label: "ID#", width: 45 },
     { key: "wineBottles", label: "Wine Bottles Total", width: 50 },
     { key: "firstName", label: "First Name", width: 70 },
     { key: "lastName", label: "Last Name", width: 70 },
     { key: "address", label: "Address", width: 138 },
     { key: "cardsTotal", label: "Cards Total", width: 55 },
     { key: "cardsActual", label: "Cards Actual", width: 60 },
-    // Repeat ID column at end
-    { key: "customerDeliveryId", label: "ID#", width: 35 },
+    { key: "id", label: "ID#", width: 35 },
   ];
 
   const totalWidth = columns.reduce((sum, c) => sum + c.width, 0);
@@ -415,9 +387,9 @@ async function generatePesachDeliveryPdf(
     y -= headerHeight;
   };
 
-  const drawDataRow = (row: DeliveryRow, rowNum: number) => {
+  const drawDataRow = (row: DeliveryRow) => {
     const maxLineCounts = columns.map((col) => {
-      const text = col.key === "#" ? String(rowNum) : row[col.key] ?? "";
+      const text = row[col.key] ?? "";
       const lines = wrapTextToWidth({
         text,
         font,
@@ -446,7 +418,7 @@ async function generatePesachDeliveryPdf(
     let x = margin;
     for (let i = 0; i < columns.length; i++) {
       const col = columns[i];
-      const text = col.key === "#" ? String(rowNum) : row[col.key] ?? "";
+      const text = row[col.key] ?? "";
       const lines = wrapTextToWidth({
         text,
         font,
@@ -481,7 +453,7 @@ async function generatePesachDeliveryPdf(
   drawTableHeader();
 
   for (let i = 0; i < rows.length; i++) {
-    drawDataRow(rows[i], i + 1);
+    drawDataRow(rows[i]);
   }
 
   const bytes = await pdfDoc.save();
@@ -609,6 +581,7 @@ export async function POST(req: Request) {
     });
 
     const rows = mapToDeliveryRows(records);
+    rows.sort((a, b) => a.lastName.localeCompare(b.lastName));
     const pdfBuffer = await generatePesachDeliveryPdf(rows, yearNum);
     const filename = `tomchei_pesach_delivery_${yearNum}.pdf`;
 
@@ -628,6 +601,35 @@ export async function POST(req: Request) {
       fieldId: REPORTS_FILE_FIELD_ID,
       buffer: pdfBuffer,
       filename,
+      contentType: "application/pdf",
+    });
+
+    // Second report: same data sorted by id (lowest to highest)
+    const rowsById = [...rows].sort((a, b) => {
+      const numA = Number(a.id);
+      const numB = Number(b.id);
+      if (!Number.isNaN(numA) && !Number.isNaN(numB)) return numA - numB;
+      return a.id.localeCompare(b.id, undefined, { numeric: true });
+    });
+    const pdfBufferById = await generatePesachDeliveryPdf(rowsById, yearNum);
+    const filenameById = `tomchei_pesach_delivery_${yearNum}_by_id.pdf`;
+
+    await clearSmartSuiteFileField({
+      apiKey,
+      accountId,
+      tableId: REPORTS_TABLE_ID,
+      recordId: REPORTS_RECORD_ID,
+      fieldId: REPORTS_FILE_FIELD_ID_BY_ID,
+    });
+
+    await uploadSmartSuiteFileToRecord({
+      apiKey,
+      accountId,
+      tableId: REPORTS_TABLE_ID,
+      recordId: REPORTS_RECORD_ID,
+      fieldId: REPORTS_FILE_FIELD_ID_BY_ID,
+      buffer: pdfBufferById,
+      filename: filenameById,
       contentType: "application/pdf",
     });
 
@@ -651,14 +653,21 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         message:
-          "Tomchei Shabbos Pesach delivery PDF generated and uploaded to SmartSuite",
+          "Tomchei Shabbos Pesach delivery PDFs generated and uploaded to SmartSuite",
         year: yearNum,
         recordCount: rows.length,
         reportsTableId: REPORTS_TABLE_ID,
         reportsRecordId: REPORTS_RECORD_ID,
-        reportsFieldId: REPORTS_FILE_FIELD_ID,
-        filename,
-        pdfSizeBytes: pdfBuffer.length,
+        byLastName: {
+          reportsFieldId: REPORTS_FILE_FIELD_ID,
+          filename,
+          pdfSizeBytes: pdfBuffer.length,
+        },
+        byId: {
+          reportsFieldId: REPORTS_FILE_FIELD_ID_BY_ID,
+          filename: filenameById,
+          pdfSizeBytes: pdfBufferById.length,
+        },
       },
       { status: 200, headers: corsHeaders() },
     );
