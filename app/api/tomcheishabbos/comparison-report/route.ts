@@ -24,6 +24,7 @@ const HISTORY_EMAIL_FIELD_ID = "s699f104ae";
 const REPORTS_TABLE_ID = "69af983fd4df284d80aa4f6b";
 const REPORTS_RECORD_ID = "69afea9689052b7b2c10cdca";
 const REPORTS_FILE_FIELD_ID = "s0297450dc";
+const REPORTS_CSV_FIELD_ID = "s8bdd40da8";
 // Date / last-created field to update for this report
 const REPORTS_LAST_CREATED_FIELD_ID = "s395630cc2";
 
@@ -249,30 +250,6 @@ function mapToCurrentPersons(rawRecords: unknown[]): PersonRecord[] {
   for (const record of rawRecords) {
     if (!isRecord(record)) continue;
 
-    // Only include records where the "Pesach Cards?" lookup (sff36bf980)
-    // has at least one truthy value.
-    const pesachCardsRaw = record["sff36bf980"];
-    let hasPesachCards = false;
-    if (Array.isArray(pesachCardsRaw)) {
-      for (const row of pesachCardsRaw as unknown[]) {
-        if (Array.isArray(row)) {
-          for (const cell of row as unknown[]) {
-            if (
-              cell === true ||
-              cell === "true" ||
-              cell === 1 ||
-              cell === "1"
-            ) {
-              hasPesachCards = true;
-              break;
-            }
-          }
-        }
-        if (hasPesachCards) break;
-      }
-    }
-    if (!hasPesachCards) continue;
-
     const id = typeof record["id"] === "string" ? record["id"] : "";
     const firstName = coerceDisplayText(record[CURRENT_FIRST_NAME_FIELD_ID]);
     const lastName = coerceDisplayText(record[CURRENT_LAST_NAME_FIELD_ID]);
@@ -389,10 +366,58 @@ function buildLastNameSummary(
   );
 }
 
+function escapeCsvCell(value: string): string {
+  const safe = String(value).replace(/"/g, '""');
+  return `"${safe}"`;
+}
+
+function buildComparisonCsv(
+  emailRows: EmailSummaryRow[],
+  lastNameRows: LastNameSummaryRow[],
+  year: number,
+): string {
+  const prevYear = year - 1;
+  const header = ["#", "Type", "Value", String(year), String(prevYear)]
+    .map(escapeCsvCell)
+    .join(",");
+  const dataRows: string[] = [];
+
+  emailRows.forEach((r, i) => {
+    dataRows.push(
+      [
+        String(i + 1),
+        "Email",
+        r.value.trim(),
+        r.thisYear ? "Y" : "",
+        r.lastYear ? "Y" : "",
+      ]
+        .map(escapeCsvCell)
+        .join(","),
+    );
+  });
+  lastNameRows.forEach((r, i) => {
+    dataRows.push(
+      [
+        String(i + 1),
+        "Last Name",
+        r.value.trim(),
+        r.thisYear ? "Y" : "",
+        r.lastYear ? "Y" : "",
+      ]
+        .map(escapeCsvCell)
+        .join(","),
+    );
+  });
+
+  return [header, ...dataRows].join("\r\n");
+}
+
 async function generateComparisonPdf(
   emailRows: EmailSummaryRow[],
   lastNameRows: LastNameSummaryRow[],
   year: number,
+  currentYearTotal: number,
+  previousYearTotal: number,
 ): Promise<Buffer> {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -433,6 +458,17 @@ async function generateComparisonPdf(
       font,
       color: rgb(0.25, 0.3, 0.4),
     });
+    y -= 20;
+    page.drawText(
+      `${year} total: ${currentYearTotal}  |  ${year - 1} total: ${previousYearTotal}`,
+      {
+        x: margin,
+        y,
+        size: 10,
+        font: bold,
+        color: rgb(0.05, 0.25, 0.55),
+      },
+    );
     y -= 24;
   };
 
@@ -777,6 +813,11 @@ export async function POST(req: Request) {
 
     const [currentRaw, historyRaw] = await Promise.all([
       fetchCurrentYearDeliveryRecords({ apiKey, accountId, year: yearNum }),
+      fetchCurrentYearDeliveryRecords({
+        apiKey,
+        accountId,
+        year: yearNum - 1,
+      }),
       fetchHistoryRecords({ apiKey, accountId }),
     ]);
 
@@ -789,10 +830,20 @@ export async function POST(req: Request) {
       historyPersons,
     );
 
+    // CSV: same comparison as PDF (current year vs history), no metrics
+    const csvContent = buildComparisonCsv(
+      emailSummary,
+      lastNameSummary,
+      yearNum,
+    );
+    const csvBuffer = Buffer.from(csvContent, "utf-8");
+
     const buffer = await generateComparisonPdf(
       emailSummary,
       lastNameSummary,
       yearNum,
+      currentPersons.length,
+      historyPersons.length,
     );
 
     const filename = `tomchei_comparison_report_${yearNum}.pdf`;
@@ -814,6 +865,24 @@ export async function POST(req: Request) {
       buffer,
       filename,
       contentType: "application/pdf",
+    });
+
+    await clearSmartSuiteFileField({
+      apiKey,
+      accountId,
+      tableId: REPORTS_TABLE_ID,
+      recordId: REPORTS_RECORD_ID,
+      fieldId: REPORTS_CSV_FIELD_ID,
+    });
+    await uploadSmartSuiteFileToRecord({
+      apiKey,
+      accountId,
+      tableId: REPORTS_TABLE_ID,
+      recordId: REPORTS_RECORD_ID,
+      fieldId: REPORTS_CSV_FIELD_ID,
+      buffer: csvBuffer,
+      filename: `tomchei_comparison_report_${yearNum}.csv`,
+      contentType: "text/csv",
     });
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -847,6 +916,8 @@ export async function POST(req: Request) {
         reportsFieldId: REPORTS_FILE_FIELD_ID,
         filename,
         fileSizeBytes: buffer.length,
+        csvFieldId: REPORTS_CSV_FIELD_ID,
+        csvFilename: `tomchei_comparison_report_${yearNum}.csv`,
       },
       { status: 200, headers: corsHeaders() },
     );
