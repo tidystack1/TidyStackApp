@@ -26,6 +26,7 @@ const REPORTS_TABLE_ID = "69af983fd4df284d80aa4f6b";
 const REPORTS_RECORD_ID = "69afea9689052b7b2c10cdca";
 const REPORTS_FILE_FIELD_ID = "s70d15f822";
 const REPORTS_FILE_FIELD_ID_BY_ID = "sb447c8ca2";
+const REPORTS_FILE_FIELD_ID_BY_ID_NO_NAMES_10PP = "s6bd6c6a83";
 const REPORTS_LAST_CREATED_FIELD_ID = "s1c5f28ecd";
 
 type SmartSuiteListResponse = {
@@ -272,21 +273,6 @@ async function generatePesachDeliveryPdf(
   rows: DeliveryRow[],
   year: number,
 ): Promise<Buffer> {
-  const pdfDoc = await PDFDocument.create();
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-  const pageWidth = 595;
-  const pageHeight = 842;
-  const margin = 21;
-  const headerHeight = 40;
-  const fontSize = 8;
-  const lineHeight = fontSize + 2;
-  const cellPaddingX = 3;
-  const cellPaddingY = 3;
-  const borderColor = rgb(0.8, 0.8, 0.8);
-  const headerBg = rgb(0.95, 0.95, 0.95);
-
   const columns: Array<{
     key: keyof DeliveryRow;
     label: string;
@@ -296,11 +282,46 @@ async function generatePesachDeliveryPdf(
     { key: "wineBottles", label: "Wine Bottles Total", width: 50 },
     { key: "firstName", label: "First Name", width: 70 },
     { key: "lastName", label: "Last Name", width: 70 },
-    { key: "address", label: "Address", width: 138 },
+    { key: "address", label: "Address", width: 300 },
     { key: "cardsTotal", label: "Cards Total", width: 55 },
     { key: "cardsActual", label: "Cards Actual", width: 60 },
     { key: "id", label: "ID#", width: 35 },
   ];
+
+  return generatePesachDeliveryPdfWithLayout(rows, year, {
+    titleSuffix: "",
+    columns,
+  });
+}
+
+async function generatePesachDeliveryPdfWithLayout(
+  rows: DeliveryRow[],
+  year: number,
+  {
+    titleSuffix,
+    columns,
+    maxRowsPerPage,
+  }: {
+    titleSuffix: string;
+    columns: Array<{ key: keyof DeliveryRow; label: string; width: number }>;
+    maxRowsPerPage?: number;
+  },
+): Promise<Buffer> {
+  const pdfDoc = await PDFDocument.create();
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  // Landscape US Letter-like points (swap portrait dimensions)
+  const pageWidth = 842;
+  const pageHeight = 595;
+  const margin = 21;
+  const headerHeight = 40;
+  const fontSize = 8;
+  const lineHeight = fontSize + 2;
+  const cellPaddingX = 3;
+  const cellPaddingY = 3;
+  const borderColor = rgb(0.8, 0.8, 0.8);
+  const headerBg = rgb(0.95, 0.95, 0.95);
 
   const totalWidth = columns.reduce((sum, c) => sum + c.width, 0);
   const maxWidth = pageWidth - margin * 2;
@@ -312,9 +333,11 @@ async function generatePesachDeliveryPdf(
 
   let page = pdfDoc.addPage([pageWidth, pageHeight]);
   let y = pageHeight - margin;
+  let rowsOnThisPage = 0;
 
   const drawHeader = () => {
-    const title = `Tomchei Shabbos - Pesach Delivery List (${year})`;
+    const suffix = titleSuffix ? ` - ${titleSuffix}` : "";
+    const title = `Tomchei Shabbos - Pesach Delivery List (${year})${suffix}`;
     page.drawText(title, {
       x: margin,
       y,
@@ -345,6 +368,7 @@ async function generatePesachDeliveryPdf(
     if (y - height < margin) {
       page = pdfDoc.addPage([pageWidth, pageHeight]);
       y = pageHeight - margin;
+      rowsOnThisPage = 0;
       drawHeader();
       drawTableHeader();
     }
@@ -396,6 +420,14 @@ async function generatePesachDeliveryPdf(
   };
 
   const drawDataRow = (row: DeliveryRow) => {
+    if (maxRowsPerPage && rowsOnThisPage >= maxRowsPerPage) {
+      page = pdfDoc.addPage([pageWidth, pageHeight]);
+      y = pageHeight - margin;
+      rowsOnThisPage = 0;
+      drawHeader();
+      drawTableHeader();
+    }
+
     const maxLineCounts = columns.map((col) => {
       const text = row[col.key] ?? "";
       const lines = wrapTextToWidth({
@@ -455,6 +487,7 @@ async function generatePesachDeliveryPdf(
       x += col.width;
     }
     y -= rowHeight;
+    rowsOnThisPage += 1;
   };
 
   drawHeader();
@@ -641,6 +674,50 @@ export async function POST(req: Request) {
       contentType: "application/pdf",
     });
 
+    // Third report: sorted by id, no first/last name columns, 10 rows per page
+    const columnsNoNames: Array<{
+      key: keyof DeliveryRow;
+      label: string;
+      width: number;
+    }> = [
+      { key: "id", label: "ID#", width: 45 },
+      { key: "wineBottles", label: "Wine Bottles Total", width: 55 },
+      { key: "address", label: "Address", width: 350 },
+      { key: "cardsTotal", label: "Cards Total", width: 70 },
+      { key: "cardsActual", label: "Cards Actual", width: 75 },
+      { key: "id", label: "ID#", width: 43 },
+    ];
+
+    const pdfBufferByIdNoNames10pp = await generatePesachDeliveryPdfWithLayout(
+      rowsById,
+      yearNum,
+      {
+        titleSuffix: "By ID (10 per page)",
+        columns: columnsNoNames,
+        maxRowsPerPage: 10,
+      },
+    );
+    const filenameByIdNoNames10pp = `tomchei_pesach_delivery_${yearNum}_by_id_10pp_no_names.pdf`;
+
+    await clearSmartSuiteFileField({
+      apiKey,
+      accountId,
+      tableId: REPORTS_TABLE_ID,
+      recordId: REPORTS_RECORD_ID,
+      fieldId: REPORTS_FILE_FIELD_ID_BY_ID_NO_NAMES_10PP,
+    });
+
+    await uploadSmartSuiteFileToRecord({
+      apiKey,
+      accountId,
+      tableId: REPORTS_TABLE_ID,
+      recordId: REPORTS_RECORD_ID,
+      fieldId: REPORTS_FILE_FIELD_ID_BY_ID_NO_NAMES_10PP,
+      buffer: pdfBufferByIdNoNames10pp,
+      filename: filenameByIdNoNames10pp,
+      contentType: "application/pdf",
+    });
+
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     await fetch(
@@ -661,21 +738,8 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         message:
-          "Tomchei Shabbos Pesach delivery PDFs generated and uploaded to SmartSuite",
+          "Success: all three Tomchei Shabbos Pesach delivery PDFs were created and uploaded to SmartSuite.",
         year: yearNum,
-        recordCount: rows.length,
-        reportsTableId: REPORTS_TABLE_ID,
-        reportsRecordId: REPORTS_RECORD_ID,
-        byLastName: {
-          reportsFieldId: REPORTS_FILE_FIELD_ID,
-          filename,
-          pdfSizeBytes: pdfBuffer.length,
-        },
-        byId: {
-          reportsFieldId: REPORTS_FILE_FIELD_ID_BY_ID,
-          filename: filenameById,
-          pdfSizeBytes: pdfBufferById.length,
-        },
       },
       { status: 200, headers: corsHeaders() },
     );
