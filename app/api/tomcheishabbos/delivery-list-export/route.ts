@@ -278,13 +278,13 @@ async function generatePesachDeliveryPdf(
     label: string;
     width: number;
   }> = [
-    { key: "id", label: "ID#", width: 45 },
+    { key: "id", label: "ID#", width: 40 },
     { key: "wineBottles", label: "Wine Bottles Total", width: 50 },
     { key: "firstName", label: "First Name", width: 70 },
-    { key: "lastName", label: "Last Name", width: 70 },
-    { key: "address", label: "Address", width: 300 },
-    { key: "cardsTotal", label: "Cards Total", width: 55 },
-    { key: "cardsActual", label: "Cards Actual", width: 60 },
+    { key: "lastName", label: "Last Name", width: 80 },
+    { key: "address", label: "Address", width: 360 },
+    { key: "cardsTotal", label: "Cards Total", width: 35 },
+    { key: "cardsActual", label: "Cards Actual", width: 35 },
     { key: "id", label: "ID#", width: 35 },
   ];
 
@@ -338,30 +338,56 @@ async function generatePesachDeliveryPdfWithLayout(
   const drawHeader = () => {
     const suffix = titleSuffix ? ` - ${titleSuffix}` : "";
     const title = `Tomchei Shabbos - Pesach Delivery List (${year})${suffix}`;
+
+    // Remember the current y so we can align right-side text with the title line
+    const titleY = y;
+
+    // Title at top-left
     page.drawText(title, {
       x: margin,
-      y,
+      y: titleY,
       size: 14,
       font: bold,
       color: rgb(0, 0, 0),
     });
-    y -= 18;
-    page.drawText(`Generated: ${new Date().toLocaleString("en-US")}`, {
-      x: margin,
-      y,
-      size: 9,
-      font,
-      color: rgb(0.2, 0.2, 0.2),
-    });
-    y -= 14;
-    page.drawText(`Total records: ${rows.length}`, {
-      x: margin,
-      y,
-      size: 9,
-      font,
-      color: rgb(0.2, 0.2, 0.2),
-    });
-    y -= 16;
+
+    if (typeof maxRowsPerPage === "number") {
+      // 10-per-page report: only "Generated" on the top-right
+      const generatedText = `Generated: ${new Date().toLocaleString("en-US")}`;
+      const generatedWidth = font.widthOfTextAtSize(generatedText, 9);
+      page.drawText(generatedText, {
+        x: pageWidth - margin - generatedWidth,
+        y: titleY,
+        size: 9,
+        font,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+    } else {
+      // Other reports: both "Generated" and "Total records" on the top-right
+      const generatedText = `Generated: ${new Date().toLocaleString("en-US")}`;
+      const totalText = `Total records: ${rows.length}`;
+      const generatedWidth = font.widthOfTextAtSize(generatedText, 9);
+      const totalWidth = font.widthOfTextAtSize(totalText, 9);
+
+      page.drawText(generatedText, {
+        x: pageWidth - margin - generatedWidth,
+        y: titleY,
+        size: 9,
+        font,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+
+      page.drawText(totalText, {
+        x: pageWidth - margin - totalWidth,
+        y: titleY - 12,
+        size: 9,
+        font,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+    }
+
+    // Move down after the header block
+    y = titleY - 18;
   };
 
   const ensureSpace = (height: number) => {
@@ -395,10 +421,17 @@ async function generatePesachDeliveryPdfWithLayout(
         maxWidth: col.width - cellPaddingX * 2,
         maxLines: 3,
       });
-      let textY = y - cellPaddingY - fontSize;
+      const textBlockHeight = lines.length * lineHeight;
+      let textY =
+        y -
+        (headerHeight - textBlockHeight) / 2 -
+        fontSize +
+        (lineHeight - fontSize) / 2;
       for (const line of lines) {
+        const lineWidth = bold.widthOfTextAtSize(line, fontSize);
+        const textX = x + (col.width - lineWidth) / 2;
         page.drawText(line, {
-          x: x + cellPaddingX,
+          x: textX,
           y: textY,
           size: fontSize,
           font: bold,
@@ -420,6 +453,10 @@ async function generatePesachDeliveryPdfWithLayout(
   };
 
   const drawDataRow = (row: DeliveryRow) => {
+    // For the 10-per-page layout, we still treat this as a single "record"
+    // for pagination purposes, but visually add extra blank rows underneath.
+    const hasExtraBlankRows = typeof maxRowsPerPage === "number";
+
     if (maxRowsPerPage && rowsOnThisPage >= maxRowsPerPage) {
       page = pdfDoc.addPage([pageWidth, pageHeight]);
       y = pageHeight - margin;
@@ -438,55 +475,78 @@ async function generatePesachDeliveryPdfWithLayout(
       });
       return lines.length;
     });
-    const rowHeight = Math.max(
+    const baseRowHeight = Math.max(
       lineHeight + cellPaddingY * 2,
       Math.max(...maxLineCounts) * lineHeight + cellPaddingY * 2,
     );
 
-    ensureSpace(rowHeight);
+    const totalRowHeight = hasExtraBlankRows
+      ? baseRowHeight * 3
+      : baseRowHeight;
 
-    page.drawRectangle({
-      x: margin,
-      y: y - rowHeight,
-      width: totalWidth,
-      height: rowHeight,
-      borderColor,
-      borderWidth: 1,
-      color: undefined,
-    });
+    ensureSpace(totalRowHeight);
 
-    let x = margin;
-    for (let i = 0; i < columns.length; i++) {
-      const col = columns[i];
-      const text = row[col.key] ?? "";
-      const lines = wrapTextToWidth({
-        text,
-        font,
-        fontSize,
-        maxWidth: col.width - cellPaddingX * 2,
+    const drawSingleRow = (
+      rowY: number,
+      drawText: boolean,
+      drawColumnLines: boolean,
+    ) => {
+      page.drawRectangle({
+        x: margin,
+        y: rowY - baseRowHeight,
+        width: totalWidth,
+        height: baseRowHeight,
+        borderColor,
+        borderWidth: 1,
+        color: undefined,
       });
-      let textY = y - cellPaddingY - fontSize;
-      for (const line of lines) {
-        page.drawText(line, {
-          x: x + cellPaddingX,
-          y: textY,
-          size: fontSize,
+
+      let x = margin;
+      for (let i = 0; i < columns.length; i++) {
+        const col = columns[i];
+        const text = drawText ? (row[col.key] ?? "") : "";
+        const lines = wrapTextToWidth({
+          text,
           font,
-          color: rgb(0, 0, 0),
+          fontSize,
+          maxWidth: col.width - cellPaddingX * 2,
         });
-        textY -= lineHeight;
+        let textY = rowY - cellPaddingY - fontSize;
+        for (const line of lines) {
+          if (!line) continue;
+          page.drawText(line, {
+            x: x + cellPaddingX,
+            y: textY,
+            size: fontSize,
+            font,
+            color: rgb(0, 0, 0),
+          });
+          textY -= lineHeight;
+        }
+        if (drawColumnLines && i < columns.length - 1) {
+          page.drawLine({
+            start: { x: x + col.width, y: rowY },
+            end: { x: x + col.width, y: rowY - baseRowHeight },
+            color: borderColor,
+            thickness: 1,
+          });
+        }
+        x += col.width;
       }
-      if (i < columns.length - 1) {
-        page.drawLine({
-          start: { x: x + col.width, y },
-          end: { x: x + col.width, y: y - rowHeight },
-          color: borderColor,
-          thickness: 1,
-        });
-      }
-      x += col.width;
+    };
+
+    // Main data row (with column dividers)
+    drawSingleRow(y, true, true);
+    y -= baseRowHeight;
+
+    if (hasExtraBlankRows) {
+      // Two blank rows underneath for manual notes/details, without vertical column lines
+      drawSingleRow(y, false, false);
+      y -= baseRowHeight;
+      drawSingleRow(y, false, false);
+      y -= baseRowHeight;
     }
-    y -= rowHeight;
+
     rowsOnThisPage += 1;
   };
 
@@ -682,9 +742,10 @@ export async function POST(req: Request) {
     }> = [
       { key: "id", label: "ID#", width: 45 },
       { key: "wineBottles", label: "Wine Bottles Total", width: 55 },
-      { key: "address", label: "Address", width: 350 },
-      { key: "cardsTotal", label: "Cards Total", width: 70 },
-      { key: "cardsActual", label: "Cards Actual", width: 75 },
+      // Make the address column wider on the 10-per-page report
+      { key: "address", label: "Address", width: 450 },
+      { key: "cardsTotal", label: "Cards Total", width: 50 },
+      { key: "cardsActual", label: "Cards Actual", width: 50 },
       { key: "id", label: "ID#", width: 43 },
     ];
 
@@ -718,7 +779,7 @@ export async function POST(req: Request) {
       contentType: "application/pdf",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     await fetch(
       `${SMARTSUITE_API_BASE}/applications/${REPORTS_TABLE_ID}/records/${REPORTS_RECORD_ID}/`,
