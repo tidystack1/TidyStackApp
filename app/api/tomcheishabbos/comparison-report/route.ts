@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 const SMARTSUITE_API_BASE = "https://app.smartsuite.com/api/v1";
+const HISTORY_BASE_YEAR = 2025;
 
 // Current year delivery list (Pesach)
 const DELIVERY_LIST_TABLE_ID = "6925af29a4002f833ea5a0e8";
@@ -16,7 +17,7 @@ const CURRENT_EMAIL_FIELD_ID = "s18619e9be";
 // Cards total for current year (lookup field — treat as string)
 const CURRENT_CARDS_FIELD_ID = "s83940c544";
 
-// Previous year / historical dataset table + fields (Pesach Data 2025)
+// Base historical dataset table + fields (Pesach Data 2025)
 const HISTORY_TABLE_ID = "69b1eb49b0d89dba92f87fe2";
 const HISTORY_FIRST_NAME_FIELD_ID = "s8e14ebc53";
 const HISTORY_LAST_NAME_FIELD_ID = "s9babce950";
@@ -43,7 +44,7 @@ type PersonRecord = {
   firstName: string;
   lastName: string;
   emails: string[];
-  source: "current" | "history";
+  year: number;
   cardsValue: string;
 };
 
@@ -141,11 +142,20 @@ function extractEmailArray(raw: unknown): string[] {
 type EmailSummaryRow = {
   email: string;
   lastName: string;
-  lastYearValue: string;
-  thisYearValue: string;
-  both: boolean;
+  yearValues: Partial<Record<number, string>>;
   isDuplicate: boolean;
 };
+
+function buildReportYears(requestedYear: number): number[] {
+  if (requestedYear < HISTORY_BASE_YEAR) {
+    return [requestedYear];
+  }
+
+  return Array.from(
+    { length: requestedYear - HISTORY_BASE_YEAR + 1 },
+    (_, index) => HISTORY_BASE_YEAR + index,
+  );
+}
 
 async function fetchDeliveryRecords(opts: {
   apiKey: string;
@@ -243,7 +253,7 @@ async function fetchHistoryRecords(opts: {
   return Array.isArray(data.items) ? data.items : [];
 }
 
-function mapToCurrentPersons(rawRecords: unknown[]): PersonRecord[] {
+function mapToCurrentPersons(rawRecords: unknown[], year: number): PersonRecord[] {
   const persons: PersonRecord[] = [];
 
   for (const record of rawRecords) {
@@ -263,7 +273,7 @@ function mapToCurrentPersons(rawRecords: unknown[]): PersonRecord[] {
       firstName,
       lastName,
       emails,
-      source: "current",
+      year,
       cardsValue,
     });
   }
@@ -291,7 +301,7 @@ function mapToHistoryPersons(rawRecords: unknown[]): PersonRecord[] {
       firstName,
       lastName,
       emails,
-      source: "history",
+      year: HISTORY_BASE_YEAR,
       cardsValue,
     });
   }
@@ -300,68 +310,44 @@ function mapToHistoryPersons(rawRecords: unknown[]): PersonRecord[] {
 }
 
 function buildEmailSummary(
-  currentPersons: PersonRecord[],
-  historyPersons: PersonRecord[],
+  persons: PersonRecord[],
+  years: number[],
 ): EmailSummaryRow[] {
   type RowEntry = {
     email: string;
     lastName: string;
-    lastYearValue: string;
-    thisYearValue: string;
+    yearValues: Partial<Record<number, string>>;
     key: string;
   };
 
   const rows: RowEntry[] = [];
-
-  // One row per email per current-year record
-  for (const person of currentPersons) {
-    const emailList = person.emails.length > 0 ? person.emails : [""];
-    for (const email of emailList) {
-      const normEmail = normalizeEmail(email) ?? "";
-      const normLastName = normalizeLastName(person.lastName) ?? "";
-      rows.push({
-        email,
-        lastName: person.lastName,
-        lastYearValue: "",
-        thisYearValue: person.cardsValue,
-        key: `${normEmail}|${normLastName}`,
-      });
-    }
-  }
-
-  // Index current rows by key so history can fill lastYearValue
+  const yearSet = new Set(years);
   const keyToIndices = new Map<string, number[]>();
-  rows.forEach((r, i) => {
-    const arr = keyToIndices.get(r.key) ?? [];
-    arr.push(i);
-    keyToIndices.set(r.key, arr);
-  });
 
-  // Process history: fill lastYearValue on matched rows, or add history-only rows
-  const historyKeysAdded = new Set<string>();
-  for (const person of historyPersons) {
+  for (const person of persons) {
+    if (!yearSet.has(person.year)) continue;
+
     const emailList = person.emails.length > 0 ? person.emails : [""];
     for (const email of emailList) {
       const normEmail = normalizeEmail(email) ?? "";
       const normLastName = normalizeLastName(person.lastName) ?? "";
       const key = `${normEmail}|${normLastName}`;
+      const matchingIndex = (keyToIndices.get(key) ?? []).find(
+        (idx) => !rows[idx].yearValues[person.year],
+      );
 
-      const matchingIndices = keyToIndices.get(key);
-      if (matchingIndices && matchingIndices.length > 0) {
-        for (const idx of matchingIndices) {
-          if (!rows[idx].lastYearValue) {
-            rows[idx].lastYearValue = person.cardsValue;
-          }
-        }
-      } else if (!historyKeysAdded.has(key)) {
+      if (matchingIndex != null) {
+        rows[matchingIndex].yearValues[person.year] = person.cardsValue;
+      } else {
         rows.push({
           email,
           lastName: person.lastName,
-          lastYearValue: person.cardsValue,
-          thisYearValue: "",
+          yearValues: { [person.year]: person.cardsValue },
           key,
         });
-        historyKeysAdded.add(key);
+        const arr = keyToIndices.get(key) ?? [];
+        arr.push(rows.length - 1);
+        keyToIndices.set(key, arr);
       }
     }
   }
@@ -382,9 +368,7 @@ function buildEmailSummary(
   return rows.map((r) => ({
     email: r.email,
     lastName: r.lastName,
-    lastYearValue: r.lastYearValue,
-    thisYearValue: r.thisYearValue,
-    both: !!r.lastYearValue && !!r.thisYearValue,
+    yearValues: r.yearValues,
     isDuplicate: (keyCount.get(r.key) ?? 0) > 1,
   }));
 }
@@ -396,15 +380,19 @@ function escapeCsvCell(value: string): string {
 
 function buildComparisonCsv(
   emailRows: EmailSummaryRow[],
-  year: number,
+  years: number[],
 ): string {
-  const prevYear = year - 1;
-  const header = ["#", "Last Name", "Email", String(prevYear), String(year)]
+  const header = ["#", "Last Name", "Email", ...years.map(String)]
     .map(escapeCsvCell)
     .join(",");
 
   const dataRows = emailRows.map((r, i) =>
-    [String(i + 1), r.lastName, r.email, r.lastYearValue, r.thisYearValue]
+    [
+      String(i + 1),
+      r.lastName,
+      r.email,
+      ...years.map((year) => r.yearValues[year] ?? ""),
+    ]
       .map(escapeCsvCell)
       .join(","),
   );
@@ -414,20 +402,20 @@ function buildComparisonCsv(
 
 async function generateComparisonPdf(
   emailRows: EmailSummaryRow[],
-  year: number,
-  currentYearTotal: number,
-  previousYearTotal: number,
+  years: number[],
+  yearTotals: Partial<Record<number, number>>,
 ): Promise<Buffer> {
-  // Only include rows that have at least one numeric value
+  const requestedYear = years[years.length - 1];
+
   const rows = emailRows.filter(
-    (r) => r.lastYearValue !== "" || r.thisYearValue !== "",
+    (r) => years.some((year) => (r.yearValues[year] ?? "") !== ""),
   );
 
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  const pageWidth = 595;
+  const basePageWidth = 595;
   const pageHeight = 842;
   const margin = 36;
   const lineHeight = 12;
@@ -436,15 +424,20 @@ async function generateComparisonPdf(
   const colIndexWidth = 25;
   const colLastNameWidth = 115;
   const colEmailWidth = 185;
-  const colFlagWidth = 82;
+  const colYearWidth =
+    years.length <= 4 ? 82 : years.length <= 6 ? 68 : 58;
   const tableWidth =
-    colIndexWidth + colLastNameWidth + colEmailWidth + 2 * colFlagWidth;
+    colIndexWidth +
+    colLastNameWidth +
+    colEmailWidth +
+    years.length * colYearWidth;
+  const pageWidth = Math.max(basePageWidth, margin * 2 + tableWidth);
 
   let page = pdfDoc.addPage([pageWidth, pageHeight]);
   let y = pageHeight - margin;
 
   const drawTitle = () => {
-    const title = `Tomchei Shabbos - Comparison Report (${year})`;
+    const title = `Tomchei Shabbos - Comparison Report (${requestedYear})`;
 
     page.drawRectangle({
       x: margin - 4,
@@ -470,17 +463,28 @@ async function generateComparisonPdf(
       color: rgb(0.25, 0.3, 0.4),
     });
     y -= 20;
-    page.drawText(
-      `${year} total: ${currentYearTotal}  |  ${year - 1} total: ${previousYearTotal}`,
-      {
+    const totalsChunks: string[] = [];
+    for (let i = 0; i < years.length; i += 4) {
+      totalsChunks.push(
+        years
+          .slice(i, i + 4)
+          .map((year) => `${year}: ${yearTotals[year] ?? 0}`)
+          .join("  |  "),
+      );
+    }
+
+    for (const line of totalsChunks) {
+      page.drawText(line, {
         x: margin,
         y,
         size: 10,
         font: bold,
         color: rgb(0.05, 0.25, 0.55),
-      },
-    );
-    y -= 24;
+      });
+      y -= 14;
+    }
+
+    y -= 10;
   };
 
   const ensureSpace = (height: number) => {
@@ -513,43 +517,63 @@ async function generateComparisonPdf(
 
   const drawMetrics = (rows: EmailSummaryRow[]) => {
     const total = rows.length;
-    let lastYearOnly = 0;
-    let thisYearOnly = 0;
+    const yearOnlyCounts: Partial<Record<number, number>> = {};
 
     for (const r of rows) {
-      const hasLast = !!r.lastYearValue;
-      const hasThis = !!r.thisYearValue;
-      if (hasLast && !hasThis) lastYearOnly += 1;
-      else if (hasThis && !hasLast) thisYearOnly += 1;
+      const populatedYears = years.filter(
+        (year) => (r.yearValues[year] ?? "") !== "",
+      );
+      if (populatedYears.length === 1) {
+        const onlyYear = populatedYears[0];
+        yearOnlyCounts[onlyYear] = (yearOnlyCounts[onlyYear] ?? 0) + 1;
+      }
     }
 
-    ensureSpace(30);
+    const metricEntries = [
+      { label: "Total", value: total },
+      ...years.map((year) => ({
+        label: `${year} Only`,
+        value: yearOnlyCounts[year] ?? 0,
+      })),
+    ];
+    const perRow = 4;
+    const rowHeight = 26;
+    const totalMetricRows = Math.ceil(metricEntries.length / perRow);
+
+    ensureSpace(totalMetricRows * rowHeight + 4);
     const baseX = margin;
     const baseY = y;
-    const gapX = 160;
+    const gapX = 120;
 
-    const drawMetric = (label: string, value: number, x: number) => {
+    const drawMetric = (label: string, value: number, x: number, yPos: number) => {
       page.drawText(label, {
         x,
-        y: baseY,
+        y: yPos,
         size: 9,
         font: bold,
         color: rgb(0.25, 0.35, 0.55),
       });
       page.drawText(String(value), {
         x,
-        y: baseY - 12,
+        y: yPos - 12,
         size: 11,
         font: bold,
         color: rgb(0.05, 0.25, 0.55),
       });
     };
 
-    drawMetric("Total", total, baseX);
-    drawMetric(`${year - 1} Only`, lastYearOnly, baseX + gapX);
-    drawMetric(`${year} Only`, thisYearOnly, baseX + 2 * gapX);
+    metricEntries.forEach((entry, index) => {
+      const column = index % perRow;
+      const row = Math.floor(index / perRow);
+      drawMetric(
+        entry.label,
+        entry.value,
+        baseX + column * gapX,
+        baseY - row * rowHeight,
+      );
+    });
 
-    y -= 26;
+    y = baseY - totalMetricRows * rowHeight;
   };
 
   const drawTableHeader = () => {
@@ -594,21 +618,15 @@ async function generateComparisonPdf(
     });
 
     x = margin + colIndexWidth + colLastNameWidth + colEmailWidth + 4;
-    page.drawText(`Received in ${year - 1}`, {
-      x,
-      y: y - 12,
-      size: 9,
-      font: bold,
-      color: rgb(0.05, 0.25, 0.55),
-    });
-
-    x += colFlagWidth;
-    page.drawText(`Received in ${year}`, {
-      x,
-      y: y - 12,
-      size: 9,
-      font: bold,
-      color: rgb(0.05, 0.25, 0.55),
+    years.forEach((year) => {
+      page.drawText(String(year), {
+        x,
+        y: y - 12,
+        size: 9,
+        font: bold,
+        color: rgb(0.05, 0.25, 0.55),
+      });
+      x += colYearWidth;
     });
 
     y -= headerHeight;
@@ -672,31 +690,21 @@ async function generateComparisonPdf(
         maxWidth: colEmailWidth - 8,
       });
 
-      // Previous year value
       x = margin + colIndexWidth + colLastNameWidth + colEmailWidth + 4;
-      if (row.lastYearValue) {
-        page.drawText(row.lastYearValue, {
-          x,
-          y: rowY,
-          size: 9,
-          font,
-          color: rgb(0.1, 0.15, 0.25),
-          maxWidth: colFlagWidth - 8,
-        });
-      }
-
-      // Current year value
-      x += colFlagWidth;
-      if (row.thisYearValue) {
-        page.drawText(row.thisYearValue, {
-          x,
-          y: rowY,
-          size: 9,
-          font,
-          color: rgb(0.1, 0.15, 0.25),
-          maxWidth: colFlagWidth - 8,
-        });
-      }
+      years.forEach((year) => {
+        const yearValue = row.yearValues[year] ?? "";
+        if (yearValue) {
+          page.drawText(yearValue, {
+            x,
+            y: rowY,
+            size: 9,
+            font,
+            color: rgb(0.1, 0.15, 0.25),
+            maxWidth: colYearWidth - 8,
+          });
+        }
+        x += colYearWidth;
+      });
 
       y -= rowHeight;
     });
@@ -826,24 +834,45 @@ export async function POST(req: Request) {
       );
     }
 
-    const [currentRaw, historyRaw] = await Promise.all([
-      fetchDeliveryRecords({ apiKey, accountId, year: yearNum }),
-      fetchHistoryRecords({ apiKey, accountId }),
+    const reportYears = buildReportYears(yearNum);
+    const deliveryYears = reportYears.filter((year) => year !== HISTORY_BASE_YEAR);
+
+    const [historyRaw, deliveryYearRecords] = await Promise.all([
+      reportYears.includes(HISTORY_BASE_YEAR)
+        ? fetchHistoryRecords({ apiKey, accountId })
+        : Promise.resolve([]),
+      Promise.all(
+        deliveryYears.map(async (year) => ({
+          year,
+          records: await fetchDeliveryRecords({ apiKey, accountId, year }),
+        })),
+      ),
     ]);
 
-    const currentPersons = mapToCurrentPersons(currentRaw);
-    const historyPersons = mapToHistoryPersons(historyRaw);
+    const yearTotals: Partial<Record<number, number>> = {};
+    const persons: PersonRecord[] = [];
 
-    const emailSummary = buildEmailSummary(currentPersons, historyPersons);
+    if (reportYears.includes(HISTORY_BASE_YEAR)) {
+      const historyPersons = mapToHistoryPersons(historyRaw);
+      yearTotals[HISTORY_BASE_YEAR] = historyPersons.length;
+      persons.push(...historyPersons);
+    }
 
-    const csvContent = buildComparisonCsv(emailSummary, yearNum);
+    for (const { year, records } of deliveryYearRecords) {
+      const currentPersons = mapToCurrentPersons(records, year);
+      yearTotals[year] = currentPersons.length;
+      persons.push(...currentPersons);
+    }
+
+    const emailSummary = buildEmailSummary(persons, reportYears);
+
+    const csvContent = buildComparisonCsv(emailSummary, reportYears);
     const csvBuffer = Buffer.from(csvContent, "utf-8");
 
     const buffer = await generateComparisonPdf(
       emailSummary,
-      yearNum,
-      currentPersons.length,
-      historyPersons.length,
+      reportYears,
+      yearTotals,
     );
 
     const filename = `tomchei_comparison_report_${yearNum}.pdf`;
@@ -907,8 +936,10 @@ export async function POST(req: Request) {
         message:
           "Tomchei Shabbos comparison report generated and uploaded to SmartSuite",
         year: yearNum,
-        currentRecordCount: currentPersons.length,
-        historyRecordCount: historyPersons.length,
+        yearsIncluded: reportYears,
+        currentRecordCount: yearTotals[yearNum] ?? 0,
+        historyRecordCount: yearTotals[HISTORY_BASE_YEAR] ?? 0,
+        yearRecordCounts: yearTotals,
         emailSummaryCount: emailSummary.length,
         reportsTableId: REPORTS_TABLE_ID,
         reportsRecordId: REPORTS_RECORD_ID,
