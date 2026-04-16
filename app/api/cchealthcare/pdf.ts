@@ -35,6 +35,7 @@ type MileageRow = {
   destinationZip?: unknown;
   purpose?: unknown;
   numberOfMiles?: unknown;
+  files: Array<Record<string, unknown>>;
 };
 
 type RecordInfo = {
@@ -190,6 +191,7 @@ function extractMileageReimbursementRows(recordDetails: unknown): MileageRow[] {
     const rows: MileageRow[] = [];
     subformData.forEach((row: unknown, index: number) => {
       if (!isRecord(row)) return;
+      const files = normalizeFiles(row["Mileage_Receipt_Upload"]);
       rows.push({
         rowNumber: index + 1,
         date: row["Date"],
@@ -203,6 +205,7 @@ function extractMileageReimbursementRows(recordDetails: unknown): MileageRow[] {
         destinationZip: row["Destination_Zip"],
         purpose: row["Purpose"],
         numberOfMiles: row["Number_Of_Miles"],
+        files,
       });
     });
 
@@ -264,7 +267,7 @@ function formatAmountForHeader(value: unknown): string | null {
   return s;
 }
 
-function headerLinesForRow(row: ExpenseRow): string[] {
+function headerLinesForExpenseRow(row: ExpenseRow): string[] {
   const date = formatDateForHeader(row.date);
   const expenseType = coerceZohoFieldText(row.expenseType);
   const purpose = coerceZohoFieldText(row.purpose);
@@ -279,7 +282,40 @@ function headerLinesForRow(row: ExpenseRow): string[] {
   return values.length ? [values.join(" | ")] : [];
 }
 
-async function downloadFileUploads(subformRows: ExpenseRow[]) {
+function headerLinesForMileageRow(row: MileageRow): string[] {
+  const date = formatDateForHeader(row.date);
+  const purpose = coerceZohoFieldText(row.purpose);
+  const miles = formatMilesValue(row.numberOfMiles);
+  const origin = buildAddress([
+    coerceZohoFieldText(row.originStreet),
+    coerceZohoFieldText(row.originCity),
+    coerceZohoFieldText(row.originState),
+    coerceZohoFieldText(row.originZip),
+  ]);
+  const destination = buildAddress([
+    coerceZohoFieldText(row.destinationStreet),
+    coerceZohoFieldText(row.destinationCity),
+    coerceZohoFieldText(row.destinationState),
+    coerceZohoFieldText(row.destinationZip),
+  ]);
+
+  const values: string[] = [];
+  values.push(`Row ${row.rowNumber}`);
+  if (date) values.push(date);
+  if (purpose) values.push(purpose);
+  if (miles) values.push(`${miles} mi`);
+  if (origin) values.push(`From: ${origin}`);
+  if (destination) values.push(`To: ${destination}`);
+  return values.length ? [values.join(" | ")] : [];
+}
+
+function headerLinesForRow(row: ExpenseRow | MileageRow): string[] {
+  return "expenseType" in row
+    ? headerLinesForExpenseRow(row)
+    : headerLinesForMileageRow(row);
+}
+
+async function downloadFileUploads(subformRows: Array<ExpenseRow | MileageRow>) {
   const accessToken = await getZohoAccessToken();
   const pdfItems: PdfItem[] = [];
   const imageItems: ImageItem[] = [];
@@ -1222,17 +1258,18 @@ export async function buildReimbursementPdf(
   formType: FormType
 ): Promise<Buffer> {
   const recordInfo = extractRecordInfo(recordDetails, formType);
+  const subformRows =
+    formType === "mileage-reimbursement"
+      ? extractMileageReimbursementRows(recordDetails)
+      : extractExpenseReimbursementRows(recordDetails);
 
   if (formType === "mileage-reimbursement") {
-    const subformRows = extractMileageReimbursementRows(recordDetails);
-    const totalMiles = calculateTotalMiles(subformRows);
+    const totalMiles = calculateTotalMiles(subformRows as MileageRow[]);
     const totalAmount = totalMiles * 0.73;
     recordInfo.totalMiles = totalMiles;
     recordInfo.totalMilesMultiplied = totalAmount;
-    return combinePDFsAndImages([], [], recordInfo, subformRows, formType);
   }
 
-  const subformRows = extractExpenseReimbursementRows(recordDetails);
   const totalFilesInSubform = subformRows.reduce(
     (sum, row) => sum + row.files.length,
     0
@@ -1240,7 +1277,9 @@ export async function buildReimbursementPdf(
 
   if (!subformRows.length || totalFilesInSubform === 0) {
     const message =
-      formType === "petty-cash"
+      formType === "mileage-reimbursement"
+        ? "No file uploads found in Mileage Reimbursement subform"
+        : formType === "petty-cash"
         ? "No file uploads found in Petty Cash subform"
         : "No file uploads found in Expense Reimbursement subform";
     throw new Error(message);
