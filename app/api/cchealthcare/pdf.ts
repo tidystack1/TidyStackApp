@@ -486,18 +486,21 @@ async function createSummaryPage(
   subformRows: ExpenseRow[] | MileageRow[],
   formType: FormType
 ): Promise<void> {
-  const page = pdfDoc.addPage([612, 792]);
+  const pageWidth = 612;
+  const pageHeight = 792;
+  let page = pdfDoc.addPage([pageWidth, pageHeight]);
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const fontSize = 10;
   const boldFontSize = 12;
   const margin = 50;
+  const bottomMargin = margin;
   const lineHeight = 15;
   const baseRowHeight = 20;
   const cellLineHeight = fontSize + 2;
   const colGap = 0;
 
-  let y = 792 - margin;
+  let y = pageHeight - margin;
 
   const formTitle =
     formType === "petty-cash"
@@ -687,49 +690,60 @@ async function createSummaryPage(
       drawCellBorder(colX.miles, yTop, colWidths.miles, height);
     }
 
-    const headerTopY = tableTopY;
-    drawRowBorders(headerTopY, baseRowHeight);
+    function drawTableHeader(headerTopY: number) {
+      drawRowBorders(headerTopY, baseRowHeight);
 
-    drawCenteredText(
-      "Date",
-      colX.date,
-      headerTopY,
-      colWidths.date,
-      boldFont,
-      fontSize
-    );
-    drawCenteredText(
-      "Origin Address",
-      colX.origin,
-      headerTopY,
-      colWidths.origin,
-      boldFont,
-      fontSize
-    );
-    drawCenteredText(
-      "Destination Address",
-      colX.destination,
-      headerTopY,
-      colWidths.destination,
-      boldFont,
-      fontSize
-    );
-    drawCenteredText(
-      "Purpose",
-      colX.purpose,
-      headerTopY,
-      colWidths.purpose,
-      boldFont,
-      fontSize
-    );
-    drawCenteredText(
-      "Miles",
-      colX.miles,
-      headerTopY,
-      colWidths.miles,
-      boldFont,
-      fontSize
-    );
+      drawCenteredText(
+        "Date",
+        colX.date,
+        headerTopY,
+        colWidths.date,
+        boldFont,
+        fontSize
+      );
+      drawCenteredText(
+        "Origin Address",
+        colX.origin,
+        headerTopY,
+        colWidths.origin,
+        boldFont,
+        fontSize
+      );
+      drawCenteredText(
+        "Destination Address",
+        colX.destination,
+        headerTopY,
+        colWidths.destination,
+        boldFont,
+        fontSize
+      );
+      drawCenteredText(
+        "Purpose",
+        colX.purpose,
+        headerTopY,
+        colWidths.purpose,
+        boldFont,
+        fontSize
+      );
+      drawCenteredText(
+        "Miles",
+        colX.miles,
+        headerTopY,
+        colWidths.miles,
+        boldFont,
+        fontSize
+      );
+    }
+
+    function startContinuationPage() {
+      page = pdfDoc.addPage([pageWidth, pageHeight]);
+      const headerTopY = pageHeight - margin;
+      drawTableHeader(headerTopY);
+      return headerTopY - baseRowHeight;
+    }
+
+    const headerTopY = tableTopY;
+    drawTableHeader(headerTopY);
 
     let currentTopY = headerTopY - baseRowHeight;
 
@@ -780,6 +794,10 @@ async function createSummaryPage(
         milesLines.length
       );
       const rowHeight = Math.max(baseRowHeight, maxLines * cellLineHeight + 6);
+
+      if (currentTopY - rowHeight < bottomMargin) {
+        currentTopY = startContinuationPage();
+      }
 
       const rowTopY = currentTopY;
       drawRowBorders(rowTopY, rowHeight);
@@ -838,6 +856,10 @@ async function createSummaryPage(
       recordInfo.totalMilesMultiplied != null
         ? formatAmountForTable(recordInfo.totalMilesMultiplied)
         : "-";
+    const totalBlockHeight = lineHeight * 3 + 2;
+    if (currentTopY - totalBlockHeight < bottomMargin) {
+      currentTopY = startContinuationPage();
+    }
     let totalY = currentTopY - lineHeight * 2;
     page.drawText(`Total Miles: ${totalMiles}`, {
       x: margin,
@@ -890,41 +912,52 @@ async function createSummaryPage(
     drawCellBorder(colX.amount, yTop, colWidths.amount, height);
   }
 
-  const headerTopY = tableTopY;
-  drawRowBorders(headerTopY, baseRowHeight);
+  function drawTableHeader(headerTopY: number) {
+    drawRowBorders(headerTopY, baseRowHeight);
 
-  drawCenteredText(
-    "Date",
-    colX.date,
-    headerTopY,
-    colWidths.date,
-    boldFont,
-    fontSize
-  );
-  drawCenteredText(
-    "Expense Type",
-    colX.expenseType,
-    headerTopY,
-    colWidths.expenseType,
-    boldFont,
-    fontSize
-  );
-  drawCenteredText(
-    "Purpose",
-    colX.purpose,
-    headerTopY,
-    colWidths.purpose,
-    boldFont,
-    fontSize
-  );
-  drawCenteredText(
-    "Amount ($)",
-    colX.amount,
-    headerTopY,
-    colWidths.amount,
-    boldFont,
-    fontSize
-  );
+    drawCenteredText(
+      "Date",
+      colX.date,
+      headerTopY,
+      colWidths.date,
+      boldFont,
+      fontSize
+    );
+    drawCenteredText(
+      "Expense Type",
+      colX.expenseType,
+      headerTopY,
+      colWidths.expenseType,
+      boldFont,
+      fontSize
+    );
+    drawCenteredText(
+      "Purpose",
+      colX.purpose,
+      headerTopY,
+      colWidths.purpose,
+      boldFont,
+      fontSize
+    );
+    drawCenteredText(
+      "Amount ($)",
+      colX.amount,
+      headerTopY,
+      colWidths.amount,
+      boldFont,
+      fontSize
+    );
+  }
+
+  function startContinuationPage() {
+    page = pdfDoc.addPage([pageWidth, pageHeight]);
+    const headerTopY = pageHeight - margin;
+    drawTableHeader(headerTopY);
+    return headerTopY - baseRowHeight;
+  }
+
+  const headerTopY = tableTopY;
+  drawTableHeader(headerTopY);
 
   let currentTopY = headerTopY - baseRowHeight;
   let totalAmount = 0;
@@ -972,6 +1005,10 @@ async function createSummaryPage(
       amountLines.length
     );
     const rowHeight = Math.max(baseRowHeight, maxLines * cellLineHeight + 6);
+
+    if (currentTopY - rowHeight < bottomMargin) {
+      currentTopY = startContinuationPage();
+    }
 
     const rowTopY = currentTopY;
     drawRowBorders(rowTopY, rowHeight);
@@ -1025,6 +1062,10 @@ async function createSummaryPage(
     currentTopY -= rowHeight;
   }
 
+  const totalBlockHeight = lineHeight * 2;
+  if (currentTopY - totalBlockHeight < bottomMargin) {
+    currentTopY = startContinuationPage();
+  }
   const totalY = currentTopY - lineHeight * 2;
   page.drawText(`Total Amount: $${totalAmount.toFixed(2)}`, {
     x: margin,

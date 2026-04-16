@@ -193,7 +193,7 @@ async function sendSubmittedEmail({
   const transporter = createTransporter();
   // in testing mode it will be sent to mspitzer@tidystack.com otherwise facilityEmail
   await transporter.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    from: formatFromAddress(process.env.SMTP_FROM || process.env.SMTP_USER),
     to: facilityEmail,
     subject: `CCHealthcare ${humanizeFormType(reimbursementType)} submitted`,
     text: `A form was submitted`,
@@ -354,7 +354,7 @@ async function sendRequesterEmail({
 
   // in testing mode it will be sent to mspitzer@tidystack.com otherwise requesterEmail
   await transporter.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    from: formatFromAddress(process.env.SMTP_FROM || process.env.SMTP_USER),
     to: requesterEmail,
     subject: `CCHealthcare ${formTypeName} - Submission Received`,
     html,
@@ -379,6 +379,12 @@ function createTransporter() {
       pass: process.env.SMTP_PASS,
     },
   });
+}
+
+function formatFromAddress(fromAddress?: string) {
+  if (!fromAddress) return undefined;
+  if (fromAddress.includes("<") && fromAddress.includes(">")) return fromAddress;
+  return `CCH Healthcare <${fromAddress}>`;
 }
 
 function humanizeFormType(formType: FormType) {
