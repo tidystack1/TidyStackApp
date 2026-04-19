@@ -1275,19 +1275,33 @@ export async function buildReimbursementPdf(
     0
   );
 
-  if (!subformRows.length || totalFilesInSubform === 0) {
+  const isMileage = formType === "mileage-reimbursement";
+
+  if (!subformRows.length) {
+    const message = isMileage
+      ? "No trips found in Mileage Reimbursement subform"
+      : formType === "petty-cash"
+      ? "No rows found in Petty Cash subform"
+      : "No rows found in Expense Reimbursement subform";
+    throw new Error(message);
+  }
+
+  // For non-mileage forms, receipt uploads are required.
+  if (!isMileage && totalFilesInSubform === 0) {
     const message =
-      formType === "mileage-reimbursement"
-        ? "No file uploads found in Mileage Reimbursement subform"
-        : formType === "petty-cash"
+      formType === "petty-cash"
         ? "No file uploads found in Petty Cash subform"
         : "No file uploads found in Expense Reimbursement subform";
     throw new Error(message);
   }
 
-  const { pdfItems, imageItems } = await downloadFileUploads(subformRows);
+  const { pdfItems, imageItems } =
+    totalFilesInSubform > 0
+      ? await downloadFileUploads(subformRows)
+      : { pdfItems: [], imageItems: [] };
 
-  if (pdfItems.length === 0 && imageItems.length === 0) {
+  // For non-mileage forms, require at least one valid PDF/image attachment.
+  if (!isMileage && pdfItems.length === 0 && imageItems.length === 0) {
     throw new Error("No PDF or image files found in subform uploads");
   }
 
