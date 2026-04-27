@@ -63,6 +63,12 @@ type ImageItem = {
   rowNumber: number;
 };
 
+type FileUploadGroup = {
+  files: Array<Record<string, unknown>>;
+  headerLines: string[];
+  rowNumber: number;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -191,7 +197,6 @@ function extractMileageReimbursementRows(recordDetails: unknown): MileageRow[] {
     const rows: MileageRow[] = [];
     subformData.forEach((row: unknown, index: number) => {
       if (!isRecord(row)) return;
-      const files = normalizeFiles(row["Mileage_Receipt_Upload"]);
       rows.push({
         rowNumber: index + 1,
         date: row["Date"],
@@ -205,7 +210,7 @@ function extractMileageReimbursementRows(recordDetails: unknown): MileageRow[] {
         destinationZip: row["Destination_Zip"],
         purpose: row["Purpose"],
         numberOfMiles: row["Number_Of_Miles"],
-        files,
+        files: [],
       });
     });
 
@@ -213,6 +218,26 @@ function extractMileageReimbursementRows(recordDetails: unknown): MileageRow[] {
   } catch (error) {
     console.error(
       "[CCHEALTHCARE] Error extracting mileage reimbursement rows:",
+      error
+    );
+    return [];
+  }
+}
+
+function extractMileageFormUploads(
+  recordDetails: unknown
+): Array<Record<string, unknown>> {
+  try {
+    const details = recordDetails as ZohoRecordDetails;
+    const record = details.data?.[0];
+    if (!record) {
+      return [];
+    }
+
+    return normalizeFiles(record["Mileage_Form_Upload"]);
+  } catch (error) {
+    console.error(
+      "[CCHEALTHCARE] Error extracting mileage form upload:",
       error
     );
     return [];
@@ -315,7 +340,33 @@ function headerLinesForRow(row: ExpenseRow | MileageRow): string[] {
     : headerLinesForMileageRow(row);
 }
 
-async function downloadFileUploads(subformRows: Array<ExpenseRow | MileageRow>) {
+function buildFileUploadGroups(
+  subformRows: Array<ExpenseRow | MileageRow>,
+  formType: FormType,
+  mileageFormUploads: Array<Record<string, unknown>>
+): FileUploadGroup[] {
+  if (formType === "mileage-reimbursement") {
+    return mileageFormUploads.length
+      ? [
+          {
+            files: mileageFormUploads,
+            headerLines: ["Mileage Form Upload"],
+            rowNumber: 0,
+          },
+        ]
+      : [];
+  }
+
+  return subformRows
+    .filter((row) => row.files.length > 0)
+    .map((row) => ({
+      files: row.files,
+      headerLines: headerLinesForRow(row),
+      rowNumber: row.rowNumber,
+    }));
+}
+
+async function downloadFileUploads(uploadGroups: FileUploadGroup[]) {
   const accessToken = await getZohoAccessToken();
   const pdfItems: PdfItem[] = [];
   const imageItems: ImageItem[] = [];
@@ -372,17 +423,16 @@ async function downloadFileUploads(subformRows: Array<ExpenseRow | MileageRow>) 
     return null;
   }
 
-  for (let rowIndex = 0; rowIndex < subformRows.length; rowIndex++) {
-    const row = subformRows[rowIndex];
-    const headerLines = headerLinesForRow(row);
+  for (let groupIndex = 0; groupIndex < uploadGroups.length; groupIndex++) {
+    const group = uploadGroups[groupIndex];
 
-    for (const file of row.files) {
+    for (const file of group.files) {
       const fileIdRaw = file["file_Id"] ?? file["id"];
       const fileNameRaw = file["file_Name"] ?? file["name"];
 
       const fileId = typeof fileIdRaw === "string" ? fileIdRaw : undefined;
       const fileName =
-        typeof fileNameRaw === "string" ? fileNameRaw : `file_${rowIndex}`;
+        typeof fileNameRaw === "string" ? fileNameRaw : `file_${groupIndex}`;
       const lowerFileName = fileName.toLowerCase();
 
       if (!fileId) {
@@ -428,24 +478,24 @@ async function downloadFileUploads(subformRows: Array<ExpenseRow | MileageRow>) 
           pdfItems.push({
             buffer,
             fileName,
-            headerLines,
-            rowNumber: row.rowNumber,
+            headerLines: group.headerLines,
+            rowNumber: group.rowNumber,
           });
         } else if (isJpeg) {
           imageItems.push({
             buffer,
             type: "jpeg",
             fileName,
-            headerLines,
-            rowNumber: row.rowNumber,
+            headerLines: group.headerLines,
+            rowNumber: group.rowNumber,
           });
         } else if (isPng) {
           imageItems.push({
             buffer,
             type: "png",
             fileName,
-            headerLines,
-            rowNumber: row.rowNumber,
+            headerLines: group.headerLines,
+            rowNumber: group.rowNumber,
           });
         }
       } catch (error) {
@@ -1270,12 +1320,18 @@ export async function buildReimbursementPdf(
     recordInfo.totalMilesMultiplied = totalAmount;
   }
 
-  const totalFilesInSubform = subformRows.reduce(
-    (sum, row) => sum + row.files.length,
-    0
-  );
-
   const isMileage = formType === "mileage-reimbursement";
+  const mileageFormUploads = isMileage
+    ? extractMileageFormUploads(recordDetails)
+    : [];
+  const uploadGroups = buildFileUploadGroups(
+    subformRows,
+    formType,
+    mileageFormUploads
+  );
+  const totalFiles = uploadGroups.reduce((sum, group) => {
+    return sum + group.files.length;
+  }, 0);
 
   if (!subformRows.length) {
     const message = isMileage
@@ -1287,7 +1343,7 @@ export async function buildReimbursementPdf(
   }
 
   // For non-mileage forms, receipt uploads are required.
-  if (!isMileage && totalFilesInSubform === 0) {
+  if (!isMileage && totalFiles === 0) {
     const message =
       formType === "petty-cash"
         ? "No file uploads found in Petty Cash subform"
@@ -1296,8 +1352,8 @@ export async function buildReimbursementPdf(
   }
 
   const { pdfItems, imageItems } =
-    totalFilesInSubform > 0
-      ? await downloadFileUploads(subformRows)
+    totalFiles > 0
+      ? await downloadFileUploads(uploadGroups)
       : { pdfItems: [], imageItems: [] };
 
   // For non-mileage forms, require at least one valid PDF/image attachment.
