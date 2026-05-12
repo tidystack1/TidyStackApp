@@ -1,21 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildPDF, parseSafeFileName, type FormData } from "../_shared/pdf-builder";
-
-function parseBody(body: Record<string, unknown>): FormData | null {
-  if (typeof body.info === "string") {
-    try {
-      return JSON.parse(body.info) as FormData;
-    } catch {
-      return null;
-    }
-  }
-  return body as FormData;
-}
+import { parseFormPDFBody } from "../_shared/parse-form-body";
+import { buildPDF, parseSafeFileName } from "../_shared/pdf-builder";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as Record<string, unknown>;
-    const data = parseBody(body);
+    const data = parseFormPDFBody(body);
 
     if (!data) {
       return NextResponse.json({ error: "Could not parse `info` field as JSON" }, { status: 400 });

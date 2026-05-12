@@ -1,3 +1,5 @@
+import { readFile } from "fs/promises";
+import path from "path";
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -31,14 +33,21 @@ const PAGE_H = 792;
 const MARGIN = 48;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 
-const COLOR_ACCENT    = rgb(0.071, 0.361, 0.451);
-const COLOR_BG_HEADER = rgb(0.071, 0.361, 0.451);
-const COLOR_SECTION_BG = rgb(0.937, 0.953, 0.957);
-const COLOR_TEXT      = rgb(0.1, 0.1, 0.1);
-const COLOR_LABEL     = rgb(0.35, 0.35, 0.35);
-const COLOR_WHITE     = rgb(1, 1, 1);
-const COLOR_LINE      = rgb(0.82, 0.82, 0.82);
-const COLOR_TOTAL_BG  = rgb(0.071, 0.361, 0.451);
+/** Highview Travel brand: #E6D09E */
+const COLOR_BRAND = rgb(230 / 255, 208 / 255, 158 / 255);
+/** Dark text / accents on brand gold and body */
+const COLOR_ACCENT = rgb(0.42, 0.34, 0.22);
+const COLOR_BG_HEADER = COLOR_BRAND;
+const COLOR_SECTION_BG = rgb(0.97, 0.94, 0.88);
+const COLOR_TEXT = rgb(0.1, 0.1, 0.1);
+const COLOR_LABEL = rgb(0.35, 0.35, 0.35);
+const COLOR_WHITE = rgb(1, 1, 1);
+const COLOR_LINE = rgb(0.82, 0.82, 0.82);
+/** Highlight row — deep gold for contrast with white text */
+const COLOR_TOTAL_BG = rgb(0.48, 0.4, 0.26);
+const COLOR_HEADER_TITLE = rgb(0.22, 0.18, 0.12);
+const COLOR_HEADER_META = rgb(0.5, 0.43, 0.32);
+const COLOR_PASSENGER_BAR = rgb(0.55, 0.46, 0.32);
 
 interface DrawCtx {
   page: ReturnType<PDFDocument["addPage"]>;
@@ -153,19 +162,43 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
   const amountOfDeals = parseInt(str(data, "Amount of deals on contact") || "0", 10);
   const mailingAddressSame = str(data, "Is the mailing address for commission check the same as the agency address?") === "YES";
   const checkPayableSame = str(data, "Is the commission's check payable name the same as the agency name?") === "YES";
-  const dealName = str(data, "HubSpot Deal Name") || "Booking Summary";
 
-  // ─── Page header ─────────────────────────────────────────────────────────
-  ctx.page.drawRectangle({ x: 0, y: PAGE_H - 70, width: PAGE_W, height: 70, color: COLOR_BG_HEADER });
-  ctx.page.drawText("TRAVEL BOOKING SUMMARY", { x: MARGIN, y: PAGE_H - 26, size: 15, font: boldFont, color: COLOR_WHITE });
-  ctx.page.drawText(dealName, { x: MARGIN, y: PAGE_H - 46, size: 10, font, color: rgb(0.8, 0.93, 0.97) });
+  // ─── Page header (brand bar + logo) ─────────────────────────────────────
+  const HEADER_H = 92;
+  ctx.page.drawRectangle({ x: 0, y: PAGE_H - HEADER_H, width: PAGE_W, height: HEADER_H, color: COLOR_BG_HEADER });
+
+  let logoW = 0;
+  let logoGap = 0;
+  try {
+    const logoPath = path.join(process.cwd(), "public", "HighViewTravel", "hv-logo.png");
+    const logoBytes = await readFile(logoPath);
+    const logoImage = await doc.embedPng(logoBytes);
+    const fitted = logoImage.scaleToFit(168, 44);
+    logoW = fitted.width;
+    const logoH = fitted.height;
+    logoGap = 18;
+    const logoX = MARGIN;
+    const logoY = PAGE_H - HEADER_H / 2 - logoH / 2;
+    ctx.page.drawImage(logoImage, { x: logoX, y: logoY, width: logoW, height: logoH });
+  } catch (e) {
+    console.warn("[pdf-builder] HighView logo not embedded:", e instanceof Error ? e.message : e);
+  }
+
+  const titleX = MARGIN + logoW + logoGap;
+  ctx.page.drawText("TRAVEL BOOKING SUMMARY", {
+    x: titleX,
+    y: PAGE_H - 36,
+    size: 15,
+    font: boldFont,
+    color: COLOR_HEADER_TITLE,
+  });
 
   const now = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const dateLabel = `Generated: ${now}`;
   const dateW = font.widthOfTextAtSize(dateLabel, 8);
-  ctx.page.drawText(dateLabel, { x: PAGE_W - MARGIN - dateW, y: PAGE_H - 62, size: 8, font, color: rgb(0.65, 0.85, 0.92) });
+  ctx.page.drawText(dateLabel, { x: PAGE_W - MARGIN - dateW, y: PAGE_H - 58, size: 8, font, color: COLOR_HEADER_META });
 
-  ctx = { ...ctx, y: PAGE_H - 82 };
+  ctx = { ...ctx, y: PAGE_H - HEADER_H - 14 };
 
   // ─── Agent Information ────────────────────────────────────────────────────
   ctx = drawSectionHeader(ctx, "Agent Information");
@@ -192,8 +225,6 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
 
   // ─── Booking Details ──────────────────────────────────────────────────────
   ctx = drawSectionHeader(ctx, "Booking Details");
-  ctx = drawLabelValue(ctx, "Deal Name:", dealName);
-  ctx = drawLabelValue(ctx, "Form Type:", formType, { bold: true });
 
   const reservationDetails = str(data, "Reservation Details");
   const penalties = str(data, "Penalties");
@@ -201,6 +232,36 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
   if (penalties) ctx = drawLabelValue(ctx, "Penalties:", penalties);
 
   ctx = gap(ctx, 10);
+
+  // ─── Passenger Details ────────────────────────────────────────────────────
+  if (numPassengers > 0) {
+    ctx = drawSectionHeader(ctx, `Passenger Details (${numPassengers} Passenger${numPassengers > 1 ? "s" : ""})`);
+
+    for (let i = 1; i <= numPassengers; i++) {
+      ctx = ensureSpace(ctx, 24);
+      ctx.page.drawRectangle({ x: MARGIN, y: ctx.y - 16, width: CONTENT_W, height: 18, color: COLOR_PASSENGER_BAR });
+      ctx.page.drawText(`Passenger ${i}`, { x: MARGIN + 8, y: ctx.y - 11, size: 9, font: boldFont, color: COLOR_WHITE });
+      ctx = { ...ctx, y: ctx.y - 24 };
+
+      const seat    = str(data, `Passenger ${i} Seat Preference`);
+      const ff      = str(data, `Passenger ${i} Frequent Flyer #`);
+      const kt      = str(data, `Passenger ${i} Known Traveler #`);
+      const special = str(data, `Passenger ${i} Special Requests`);
+
+      if (seat)    ctx = drawLabelValue(ctx, "Seat Preference:", seat,    { indent: 12 });
+      if (ff)      ctx = drawLabelValue(ctx, "Frequent Flyer #:", ff,     { indent: 12 });
+      if (kt)      ctx = drawLabelValue(ctx, "Known Traveler #:", kt,     { indent: 12 });
+      if (special) ctx = drawLabelValue(ctx, "Special Requests:", special, { indent: 12 });
+
+      if (!seat && !ff && !kt && !special) {
+        ctx = drawLabelValue(ctx, "", "No additional details provided.", { indent: 12 });
+      }
+
+      ctx = gap(ctx, 6);
+    }
+
+    ctx = gap(ctx, 10);
+  }
 
   // ─── Payment Information ──────────────────────────────────────────────────
   ctx = drawSectionHeader(ctx, "Payment Information");
@@ -238,36 +299,6 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
     ctx = gap(ctx, 4);
     ctx = drawLabelValue(ctx, "= Total Authorized to Charge PP*:", currency(totalAuthorized), { bold: true, highlight: true });
     ctx = gap(ctx, 4);
-  }
-
-  ctx = gap(ctx, 10);
-
-  // ─── Passenger Information ────────────────────────────────────────────────
-  if (numPassengers > 0) {
-    ctx = drawSectionHeader(ctx, `Passenger Information (${numPassengers} Passenger${numPassengers > 1 ? "s" : ""})`);
-
-    for (let i = 1; i <= numPassengers; i++) {
-      ctx = ensureSpace(ctx, 24);
-      ctx.page.drawRectangle({ x: MARGIN, y: ctx.y - 16, width: CONTENT_W, height: 18, color: rgb(0.22, 0.52, 0.60) });
-      ctx.page.drawText(`Passenger ${i}`, { x: MARGIN + 8, y: ctx.y - 11, size: 9, font: boldFont, color: COLOR_WHITE });
-      ctx = { ...ctx, y: ctx.y - 24 };
-
-      const seat    = str(data, `Passenger ${i} Seat Preference`);
-      const ff      = str(data, `Passenger ${i} Frequent Flyer #`);
-      const kt      = str(data, `Passenger ${i} Known Traveler #`);
-      const special = str(data, `Passenger ${i} Special Requests`);
-
-      if (seat)    ctx = drawLabelValue(ctx, "Seat Preference:", seat,    { indent: 12 });
-      if (ff)      ctx = drawLabelValue(ctx, "Frequent Flyer #:", ff,     { indent: 12 });
-      if (kt)      ctx = drawLabelValue(ctx, "Known Traveler #:", kt,     { indent: 12 });
-      if (special) ctx = drawLabelValue(ctx, "Special Requests:", special, { indent: 12 });
-
-      if (!seat && !ff && !kt && !special) {
-        ctx = drawLabelValue(ctx, "", "No additional details provided.", { indent: 12 });
-      }
-
-      ctx = gap(ctx, 6);
-    }
   }
 
   // ─── Footer on every page ─────────────────────────────────────────────────

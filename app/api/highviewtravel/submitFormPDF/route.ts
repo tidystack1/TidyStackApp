@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { parseFormPDFBody } from "../_shared/parse-form-body";
 import {
   buildPDF,
   parseSafeFileName,
@@ -98,19 +99,6 @@ async function updateDealProperty(
   }
 }
 
-// ─── Body parser ──────────────────────────────────────────────────────────────
-
-function parseBody(body: Record<string, unknown>): FormData | null {
-  if (typeof body.info === "string") {
-    try {
-      return JSON.parse(body.info) as FormData;
-    } catch {
-      return null;
-    }
-  }
-  return body as FormData;
-}
-
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -118,7 +106,7 @@ export async function POST(request: NextRequest) {
     const { token, property } = getConfig();
 
     const body = (await request.json()) as Record<string, unknown>;
-    const data = parseBody(body);
+    const data = parseFormPDFBody(body);
 
     if (!data) {
       return NextResponse.json(
