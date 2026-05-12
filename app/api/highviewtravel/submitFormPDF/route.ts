@@ -1,11 +1,179 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseFormPDFBody } from "../_shared/parse-form-body";
-import { buildPDF, parseSafeFileName, str } from "../_shared/pdf-builder";
+import {
+  buildPDF,
+  parseSafeFileName,
+  str,
+  type FormData,
+} from "../_shared/pdf-builder";
 
 /** HubSpot CRM `crm/v3/pipelines/deals` — pipeline "Ticketing" */
 const HUBSPOT_TICKETING_PIPELINE_ID = "9038862";
 /** Same API — stage "FORM RECEIVED/SEND IN SALE" within Ticketing */
 const HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID = "25756531";
+
+function currency(value: string): string {
+  const n = parseFloat(value);
+  if (Number.isNaN(n)) return value || "—";
+  return `$${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function present(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed !== "0" && trimmed !== "0.00";
+}
+
+function inferPassengerCount(data: FormData): number {
+  const explicit = parseInt(str(data, "Number of passengers") || "0", 10);
+  if (!Number.isNaN(explicit) && explicit > 0) return explicit;
+
+  let max = 0;
+  const re = /^Passenger (\d+)\s/;
+  for (const key of Object.keys(data)) {
+    const m = key.match(re);
+    if (!m) continue;
+    const n = parseInt(m[1] ?? "0", 10);
+    if (!Number.isNaN(n) && n > max) max = n;
+  }
+  return max;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function withLineBreaks(value: string): string {
+  return escapeHtml(value).replaceAll(/\r?\n/g, "<br/>");
+}
+
+function row(label: string, value: string): string {
+  return `
+    <tr>
+      <td style="padding:6px 10px;border:1px solid #e6e6e6;background:#f7f7f7;font-weight:600;width:32%;">${escapeHtml(label)}</td>
+      <td style="padding:6px 10px;border:1px solid #e6e6e6;">${withLineBreaks(value || "—")}</td>
+    </tr>
+  `;
+}
+
+function section(title: string, rows: string): string {
+  return `
+    <h3 style="margin:20px 0 8px;font-size:16px;color:#1a1a1a;">${escapeHtml(title)}</h3>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1a1a1a;">
+      ${rows}
+    </table>
+  `;
+}
+
+function buildEmailHtml(data: FormData, dealName: string, dealId: string): string {
+  const formType = str(data, "Form Type");
+  const isFora = formType === "Fora";
+  const numPassengers = inferPassengerCount(data);
+  const amountOfDeals = parseInt(str(data, "Amount of deals on contact") || "0", 10);
+  const mailingAddressSame =
+    str(
+      data,
+      "Is the mailing address for commission check the same as the agency address?",
+    ) === "YES";
+  const checkPayableSame =
+    str(
+      data,
+      "Is the commission's check payable name the same as the agency name?",
+    ) === "YES";
+
+  const agentRows: string[] = [
+    row("Agent Name", str(data, "Agent Name")),
+    row("Agency Name", str(data, "Agency Name")),
+    row("Email", str(data, "Email")),
+  ];
+  if (amountOfDeals === 1) {
+    const agencyAddr = str(data, "Please provide your agency address");
+    if (agencyAddr) agentRows.push(row("Agency Address", agencyAddr));
+  }
+  if (!mailingAddressSame) {
+    const mailingAddr = str(data, "Mailing Address");
+    if (mailingAddr) agentRows.push(row("Mailing Address", mailingAddr));
+  }
+  if (!checkPayableSame) {
+    const checkPayable = str(data, "Check Payable to");
+    if (checkPayable) agentRows.push(row("Check Payable to", checkPayable));
+  }
+
+  const bookingRows: string[] = [];
+  const reservationDetails = str(data, "Reservation Details");
+  const penalties = str(data, "Penalties");
+  if (reservationDetails) bookingRows.push(row("Reservation Details", reservationDetails));
+  if (penalties) bookingRows.push(row("Penalties", penalties));
+  if (bookingRows.length === 0) bookingRows.push(row("Details", "No booking details provided."));
+
+  const passengerSections: string[] = [];
+  for (let i = 1; i <= numPassengers; i++) {
+    const details: string[] = [];
+    const seat = str(data, `Passenger ${i} Seat Preference`);
+    const ff = str(data, `Passenger ${i} Frequent Flyer #`);
+    const kt = str(data, `Passenger ${i} Known Traveler #`);
+    const special = str(data, `Passenger ${i} Special Requests`);
+    if (seat) details.push(row("Seat Preference", seat));
+    if (ff) details.push(row("Frequent Flyer #", ff));
+    if (kt) details.push(row("Known Traveler #", kt));
+    if (special) details.push(row("Special Requests", special));
+    if (details.length === 0) details.push(row("Details", "No additional details provided."));
+    passengerSections.push(section(`Passenger ${i}`, details.join("")));
+  }
+
+  const paymentRows = row("Form of Payment", str(data, "Form of payment"));
+
+  const fareRows: string[] = [];
+  const ratePerPerson = str(data, "RATE PER PERSON");
+  const basePerPerson = str(data, "Base Per Person");
+  const issuingFee = str(data, "Issuing Fee");
+  const commissionPP = str(data, "+ COMMISSION PP");
+  const taxesAndFees = str(data, "Taxes and Fees Per Person");
+  const totalPerPerson = str(data, "Total Per Person");
+  const total = str(data, "Total");
+  const ccFee = str(data, "+ 3.5% CC FEE (NON-REFUNDABLE)");
+  const totalAuthorized = str(data, "= TOTAL AUTHORIZED TO CHARGE PP*");
+
+  if (!isFora && present(ratePerPerson)) fareRows.push(row("Rate Per Person", currency(ratePerPerson)));
+  if (isFora && present(basePerPerson)) fareRows.push(row("Base Per Person", currency(basePerPerson)));
+  if (isFora && present(taxesAndFees)) fareRows.push(row("Taxes & Fees Per Person", currency(taxesAndFees)));
+  if (present(issuingFee)) fareRows.push(row("Issuing Fee", currency(issuingFee)));
+  if (present(commissionPP)) fareRows.push(row("+ Commission PP", currency(commissionPP)));
+  if (present(totalPerPerson)) fareRows.push(row("Total Per Person", currency(totalPerPerson)));
+  if (!isFora && present(total)) fareRows.push(row("Total", currency(total)));
+  if (present(ccFee)) fareRows.push(row("+ 3.5% CC Fee (non-refundable)", currency(ccFee)));
+  if (present(totalAuthorized)) {
+    fareRows.push(row("= Total Authorized to Charge PP*", currency(totalAuthorized)));
+  }
+  if (fareRows.length === 0) fareRows.push(row("Fare", "No fare details provided."));
+
+  const passengerBlock =
+    passengerSections.length > 0
+      ? `
+        <h3 style="margin:20px 0 8px;font-size:16px;color:#1a1a1a;">Passenger Details (${numPassengers} Passenger${numPassengers > 1 ? "s" : ""})</h3>
+        ${passengerSections.join("")}
+      `
+      : "";
+
+  return `
+    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;color:#1a1a1a;max-width:780px;margin:0 auto;">
+      <h2 style="margin:0 0 6px;font-size:22px;">Travel Booking Summary</h2>
+      <p style="margin:0 0 14px;color:#555;">Deal: ${escapeHtml(dealName)} (${escapeHtml(dealId)})</p>
+      ${section("Agent Information", agentRows.join(""))}
+      ${section("Booking Details", bookingRows.join(""))}
+      ${passengerBlock}
+      ${section("Payment Information", paymentRows)}
+      ${section("Fare Breakdown", fareRows.join(""))}
+    </div>
+  `;
+}
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -184,6 +352,7 @@ export async function POST(request: NextRequest) {
 
     const previous = await fetchDealFileProperty(dealId, property, token);
     const propertyValue = mergeDealFilePropertyValue(previous, fileId);
+    const emailHtml = buildEmailHtml(data, dealName, dealId);
 
     // 3. File property + Ticketing / FORM RECEIVED/SEND IN SALE (single PATCH)
     const dealProps: Record<string, string> = {
@@ -207,6 +376,7 @@ export async function POST(request: NextRequest) {
       property,
       pipelineId: HUBSPOT_TICKETING_PIPELINE_ID,
       dealStageId: HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID,
+      emailHtml,
     });
   } catch (error) {
     console.error("[submitFormPDF] Error:", error);
