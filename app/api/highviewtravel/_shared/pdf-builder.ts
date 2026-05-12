@@ -22,6 +22,23 @@ function present(value: string): boolean {
   return value.trim().length > 0 && value.trim() !== "0" && value.trim() !== "0.00";
 }
 
+/** Uses "Number of passengers" when set; otherwise infers max N from keys like "Passenger 3 Seat Preference". */
+function inferPassengerCount(data: FormData): number {
+  const explicit = parseInt(str(data, "Number of passengers") || "0", 10);
+  if (!Number.isNaN(explicit) && explicit > 0) return explicit;
+
+  let max = 0;
+  const re = /^Passenger (\d+)\s/;
+  for (const key of Object.keys(data)) {
+    const m = key.match(re);
+    if (m) {
+      const n = parseInt(m[1]!, 10);
+      if (!Number.isNaN(n) && n > max) max = n;
+    }
+  }
+  return max;
+}
+
 export function parseSafeFileName(dealName: string): string {
   return (dealName || "booking").replace(/[^a-z0-9]/gi, "_").toLowerCase();
 }
@@ -158,7 +175,7 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
 
   const formType = str(data, "Form Type");
   const isFora = formType === "Fora";
-  const numPassengers = parseInt(str(data, "Number of passengers") || "0", 10);
+  const numPassengers = inferPassengerCount(data);
   const amountOfDeals = parseInt(str(data, "Amount of deals on contact") || "0", 10);
   const mailingAddressSame = str(data, "Is the mailing address for commission check the same as the agency address?") === "YES";
   const checkPayableSame = str(data, "Is the commission's check payable name the same as the agency name?") === "YES";

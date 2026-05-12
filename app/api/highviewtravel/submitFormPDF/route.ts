@@ -28,8 +28,52 @@ function getConfig() {
 // ─── HubSpot helpers ──────────────────────────────────────────────────────────
 
 /**
+ * HubSpot `fieldType: "file"` properties store **file IDs** (from File Manager), not URLs.
+ * Passing a URL makes the UI show a link-like row instead of a real attachment.
+ */
+function mergeDealFilePropertyValue(
+  existing: string | undefined,
+  newFileId: string,
+): string {
+  const segments = (existing ?? "")
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Drop mistaken URL strings from older integrations; keep real IDs from manual uploads.
+  const kept = segments.filter((s) => !/^https?:\/\//i.test(s));
+  const ids = [...new Set([...kept, newFileId])];
+  return ids.join(";");
+}
+
+async function fetchDealFileProperty(
+  dealId: string,
+  property: string,
+  token: string,
+): Promise<string | undefined> {
+  const url = new URL(
+    `https://api.hubapi.com/crm/v3/objects/deals/${encodeURIComponent(dealId)}`,
+  );
+  url.searchParams.set("properties", property);
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HubSpot deal fetch failed (${res.status}): ${text}`);
+  }
+
+  const json = (await res.json()) as {
+    properties?: Record<string, string | null>;
+  };
+  const raw = json.properties?.[property];
+  return raw ?? undefined;
+}
+
+/**
  * Upload a PDF file to HubSpot's File Manager.
- * Returns the public URL of the uploaded file.
+ * Returns the File Manager id and public URL.
  */
 async function uploadFileToHubSpot(
   pdfBytes: Uint8Array,
@@ -134,24 +178,28 @@ export async function POST(request: NextRequest) {
 
     // 2. Upload to HubSpot File Manager
     console.log(`[submitFormPDF] Uploading ${fileName} to HubSpot Files`);
-    const { url: fileUrl } = await uploadFileToHubSpot(
+    const { id: fileId, url: fileUrl } = await uploadFileToHubSpot(
       pdfBytes,
       fileName,
       token,
     );
-    console.log(`[submitFormPDF] Uploaded successfully: ${fileUrl}`);
+    console.log(`[submitFormPDF] Uploaded successfully: ${fileUrl} (id=${fileId})`);
 
-    // 3. Update the deal property with the file URL
+    const previous = await fetchDealFileProperty(dealId, property, token);
+    const propertyValue = mergeDealFilePropertyValue(previous, fileId);
+
+    // 3. Set the deal file property to File Manager id(s), not the public URL
     console.log(
       `[submitFormPDF] Updating deal ${dealId} property "${property}"`,
     );
-    await updateDealProperty(dealId, property, fileUrl, token);
+    await updateDealProperty(dealId, property, propertyValue, token);
     console.log(`[submitFormPDF] Deal updated successfully`);
 
     return NextResponse.json({
       success: true,
       dealId,
       dealName,
+      fileId,
       fileUrl,
       property,
     });
