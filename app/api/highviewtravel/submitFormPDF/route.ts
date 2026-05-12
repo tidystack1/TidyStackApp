@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseFormPDFBody } from "../_shared/parse-form-body";
-import {
-  buildPDF,
-  parseSafeFileName,
-  str,
-  type FormData,
-} from "../_shared/pdf-builder";
+import { buildPDF, parseSafeFileName, str } from "../_shared/pdf-builder";
+
+/** HubSpot CRM `crm/v3/pipelines/deals` — pipeline "Ticketing" */
+const HUBSPOT_TICKETING_PIPELINE_ID = "9038862";
+/** Same API — stage "FORM RECEIVED/SEND IN SALE" within Ticketing */
+const HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID = "25756531";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -116,13 +116,10 @@ async function uploadFileToHubSpot(
   return { id: json.id, url: json.url };
 }
 
-/**
- * Update a HubSpot deal property.
- */
-async function updateDealProperty(
+/** PATCH deal properties (`pipeline` + `dealstage` move the deal to another pipeline/stage). */
+async function patchDealProperties(
   dealId: string,
-  property: string,
-  value: string,
+  properties: Record<string, string>,
   token: string,
 ): Promise<void> {
   const res = await fetch(
@@ -133,7 +130,7 @@ async function updateDealProperty(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ properties: { [property]: value } }),
+      body: JSON.stringify({ properties }),
     },
   );
 
@@ -188,11 +185,17 @@ export async function POST(request: NextRequest) {
     const previous = await fetchDealFileProperty(dealId, property, token);
     const propertyValue = mergeDealFilePropertyValue(previous, fileId);
 
-    // 3. Set the deal file property to File Manager id(s), not the public URL
+    // 3. File property + Ticketing / FORM RECEIVED/SEND IN SALE (single PATCH)
+    const dealProps: Record<string, string> = {
+      [property]: propertyValue,
+      pipeline: HUBSPOT_TICKETING_PIPELINE_ID,
+      dealstage: HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID,
+    };
+
     console.log(
-      `[submitFormPDF] Updating deal ${dealId} property "${property}"`,
+      `[submitFormPDF] Updating deal ${dealId} → pipeline ${HUBSPOT_TICKETING_PIPELINE_ID}, stage ${HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID}; property "${property}"`,
     );
-    await updateDealProperty(dealId, property, propertyValue, token);
+    await patchDealProperties(dealId, dealProps, token);
     console.log(`[submitFormPDF] Deal updated successfully`);
 
     return NextResponse.json({
@@ -202,6 +205,8 @@ export async function POST(request: NextRequest) {
       fileId,
       fileUrl,
       property,
+      pipelineId: HUBSPOT_TICKETING_PIPELINE_ID,
+      dealStageId: HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID,
     });
   } catch (error) {
     console.error("[submitFormPDF] Error:", error);
