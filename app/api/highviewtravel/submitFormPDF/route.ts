@@ -185,9 +185,22 @@ function buildEmailHtml(
         ${passengerSections.join("")}
       `
       : "";
+  const submissionId = str(data, "submissionID");
+  const submissionUrl = submissionId
+    ? `https://www.formstack.com/admin/submission/view/${encodeURIComponent(submissionId)}/58429290`
+    : "";
+  const submissionLinkBlock = submissionId
+    ? `
+      <div style="margin:0 0 18px;padding:16px 18px;border:2px solid #126181;border-radius:8px;background:#eef8fc;font-family:Arial,Helvetica,sans-serif;">
+        <div style="font-size:18px;font-weight:700;color:#126181;margin-bottom:8px;">Here's a link to the submission ${escapeHtml(submissionId)}</div>
+        <a href="${submissionUrl}" style="font-size:16px;font-weight:700;color:#0b5cad;text-decoration:underline;word-break:break-all;">${submissionUrl}</a>
+      </div>
+    `
+    : "";
 
   return `
     <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;color:#1a1a1a;max-width:780px;margin:0 auto;">
+      ${submissionLinkBlock}
       <h2 style="margin:0 0 6px;font-size:22px;">Travel Booking Summary</h2>
       <p style="margin:0 0 14px;color:#555;">Deal: ${escapeHtml(dealName)} (${escapeHtml(dealId)})</p>
       ${section("Agent Information", agentRows.join(""))}
