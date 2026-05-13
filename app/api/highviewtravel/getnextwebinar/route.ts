@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         active: false,
         start_time: null,
-        start_time_formated: null,
+        start_time_formatted: null,
         start_date: null,
         join_url: null,
         registration_url: null,
