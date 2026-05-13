@@ -256,8 +256,11 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
 
     for (let i = 1; i <= numPassengers; i++) {
       ctx = ensureSpace(ctx, 24);
+      const passengerName = str(data, `Passenger ${i} Name`);
+      const passengerLabel = passengerName ? `Passenger ${i} - ${passengerName}` : `Passenger ${i}`;
+
       ctx.page.drawRectangle({ x: MARGIN, y: ctx.y - 16, width: CONTENT_W, height: 18, color: COLOR_PASSENGER_BAR });
-      ctx.page.drawText(`Passenger ${i}`, { x: MARGIN + 8, y: ctx.y - 11, size: 9, font: boldFont, color: COLOR_WHITE });
+      ctx.page.drawText(passengerLabel, { x: MARGIN + 8, y: ctx.y - 11, size: 9, font: boldFont, color: COLOR_WHITE });
       ctx = { ...ctx, y: ctx.y - 24 };
 
       const seat    = str(data, `Passenger ${i} Seat Preference`);
