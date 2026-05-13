@@ -72,11 +72,18 @@ function section(title: string, rows: string): string {
   `;
 }
 
-function buildEmailHtml(data: FormData, dealName: string, dealId: string): string {
+function buildEmailHtml(
+  data: FormData,
+  dealName: string,
+  dealId: string,
+): string {
   const formType = str(data, "Form Type");
   const isFora = formType === "Fora";
   const numPassengers = inferPassengerCount(data);
-  const amountOfDeals = parseInt(str(data, "Amount of deals on contact") || "0", 10);
+  const amountOfDeals = parseInt(
+    str(data, "Amount of deals on contact") || "0",
+    10,
+  );
   const mailingAddressSame =
     str(
       data,
@@ -109,13 +116,19 @@ function buildEmailHtml(data: FormData, dealName: string, dealId: string): strin
   const bookingRows: string[] = [];
   const reservationDetails = str(data, "Reservation Details");
   const penalties = str(data, "Penalties");
-  if (reservationDetails) bookingRows.push(row("Reservation Details", reservationDetails));
+  if (reservationDetails)
+    bookingRows.push(row("Reservation Details", reservationDetails));
   if (penalties) bookingRows.push(row("Penalties", penalties));
-  if (bookingRows.length === 0) bookingRows.push(row("Details", "No booking details provided."));
+  if (bookingRows.length === 0)
+    bookingRows.push(row("Details", "No booking details provided."));
 
   const passengerSections: string[] = [];
   for (let i = 1; i <= numPassengers; i++) {
     const details: string[] = [];
+    const passengerName = str(data, `Passenger ${i} Name`);
+    const passengerLabel = passengerName
+      ? `Passenger ${i} - ${passengerName}`
+      : `Passenger ${i}`;
     const seat = str(data, `Passenger ${i} Seat Preference`);
     const ff = str(data, `Passenger ${i} Frequent Flyer #`);
     const kt = str(data, `Passenger ${i} Known Traveler #`);
@@ -124,8 +137,9 @@ function buildEmailHtml(data: FormData, dealName: string, dealId: string): strin
     if (ff) details.push(row("Frequent Flyer #", ff));
     if (kt) details.push(row("Known Traveler #", kt));
     if (special) details.push(row("Special Requests", special));
-    if (details.length === 0) details.push(row("Details", "No additional details provided."));
-    passengerSections.push(section(`Passenger ${i}`, details.join("")));
+    if (details.length === 0)
+      details.push(row("Details", "No additional details provided."));
+    passengerSections.push(section(passengerLabel, details.join("")));
   }
 
   const paymentRows = row("Form of Payment", str(data, "Form of payment"));
@@ -141,18 +155,28 @@ function buildEmailHtml(data: FormData, dealName: string, dealId: string): strin
   const ccFee = str(data, "+ 3.5% CC FEE (NON-REFUNDABLE)");
   const totalAuthorized = str(data, "= TOTAL AUTHORIZED TO CHARGE PP*");
 
-  if (!isFora && present(ratePerPerson)) fareRows.push(row("Rate Per Person", currency(ratePerPerson)));
-  if (isFora && present(basePerPerson)) fareRows.push(row("Base Per Person", currency(basePerPerson)));
-  if (isFora && present(taxesAndFees)) fareRows.push(row("Taxes & Fees Per Person", currency(taxesAndFees)));
-  if (present(issuingFee)) fareRows.push(row("Issuing Fee", currency(issuingFee)));
-  if (present(commissionPP)) fareRows.push(row("+ Commission PP", currency(commissionPP)));
-  if (present(totalPerPerson)) fareRows.push(row("Total Per Person", currency(totalPerPerson)));
+  if (!isFora && present(ratePerPerson))
+    fareRows.push(row("Rate Per Person", currency(ratePerPerson)));
+  if (isFora && present(basePerPerson))
+    fareRows.push(row("Base Per Person", currency(basePerPerson)));
+  if (isFora && present(taxesAndFees))
+    fareRows.push(row("Taxes & Fees Per Person", currency(taxesAndFees)));
+  if (present(issuingFee))
+    fareRows.push(row("Issuing Fee", currency(issuingFee)));
+  if (present(commissionPP))
+    fareRows.push(row("+ Commission PP", currency(commissionPP)));
+  if (present(totalPerPerson))
+    fareRows.push(row("Total Per Person", currency(totalPerPerson)));
   if (!isFora && present(total)) fareRows.push(row("Total", currency(total)));
-  if (present(ccFee)) fareRows.push(row("+ 3.5% CC Fee (non-refundable)", currency(ccFee)));
+  if (present(ccFee))
+    fareRows.push(row("+ 3.5% CC Fee (non-refundable)", currency(ccFee)));
   if (present(totalAuthorized)) {
-    fareRows.push(row("= Total Authorized to Charge PP*", currency(totalAuthorized)));
+    fareRows.push(
+      row("= Total Authorized to Charge PP*", currency(totalAuthorized)),
+    );
   }
-  if (fareRows.length === 0) fareRows.push(row("Fare", "No fare details provided."));
+  if (fareRows.length === 0)
+    fareRows.push(row("Fare", "No fare details provided."));
 
   const passengerBlock =
     passengerSections.length > 0
@@ -348,7 +372,9 @@ export async function POST(request: NextRequest) {
       fileName,
       token,
     );
-    console.log(`[submitFormPDF] Uploaded successfully: ${fileUrl} (id=${fileId})`);
+    console.log(
+      `[submitFormPDF] Uploaded successfully: ${fileUrl} (id=${fileId})`,
+    );
 
     const previous = await fetchDealFileProperty(dealId, property, token);
     const propertyValue = mergeDealFilePropertyValue(previous, fileId);
