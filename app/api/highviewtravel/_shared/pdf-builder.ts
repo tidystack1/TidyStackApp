@@ -602,8 +602,14 @@ export async function buildFormstackDefaultDataStylePDF(
   });
   const browser = str(data, "Browser");
   const ip = str(data, "IP Address");
-  const uniqueId = str(data, "Unique ID");
   const location = str(data, "Location");
+  /** Same as `submissionID` in the email HTML Formstack submission URL. */
+  const submissionId = str(data, "submissionID");
+
+  if (submissionId) {
+    ctx = fsDrawTwoColumnRow(ctx, "Unique ID", submissionId);
+    ctx = fsGap(ctx, 6);
+  }
 
   const metaEntries: { label: string; value: string }[] = [
     { label: "Form Name", value: formName },
@@ -611,7 +617,6 @@ export async function buildFormstackDefaultDataStylePDF(
   ];
   if (browser) metaEntries.push({ label: "Browser", value: browser });
   if (ip) metaEntries.push({ label: "IP Address", value: ip });
-  if (uniqueId) metaEntries.push({ label: "Unique ID", value: uniqueId });
   if (location) metaEntries.push({ label: "Location", value: location });
   ctx = fsDrawMetaBlock(ctx, metaEntries);
 
