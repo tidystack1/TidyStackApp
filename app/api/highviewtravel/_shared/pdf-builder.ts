@@ -335,13 +335,28 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
   return doc.save();
 }
 
-// ─── Formstack “Default Data” style PDF (plain text dump, like Formstack export) ─
+// ─── Formstack “Default Data” style PDF (gray label/value cells, dotted borders) ─
 
 const FS_PAGE_W = 612;
 const FS_PAGE_H = 792;
 const FS_MARGIN = 54;
 const FS_CONTENT_W = FS_PAGE_W - FS_MARGIN * 2;
 const FS_MAX_PASSENGERS = 9;
+/** Label / section bar (≈ #eee) */
+const FS_LABEL_BG = rgb(238 / 255, 238 / 255, 238 / 255);
+/** Value cell (≈ #f9f9f9) */
+const FS_VALUE_BG = rgb(249 / 255, 249 / 255, 249 / 255);
+/** Metadata outer block (≈ #f2f2f2) */
+const FS_META_BG = rgb(242 / 255, 242 / 255, 242 / 255);
+const FS_BORDER = rgb(55 / 255, 55 / 255, 55 / 255);
+const FS_TEXT = rgb(0.08, 0.08, 0.08);
+const FS_DASH: [number, number] = [1, 2];
+const FS_ROW_GAP = 5;
+const FS_SECTION_GAP = 10;
+const FS_CELL_PAD = 6;
+const FS_LABEL_COL_W = 186;
+const FS_COL_GAP = 5;
+const FS_CELL_SIZE = 9;
 
 interface FsDrawCtx {
   page: ReturnType<PDFDocument["addPage"]>;
@@ -363,49 +378,190 @@ function fsGap(ctx: FsDrawCtx, n = 6): FsDrawCtx {
   return { ...ctx, y: ctx.y - n };
 }
 
-function fsDrawWrapped(
+/** Right-aligned label cell + left-aligned value cell, dotted borders. */
+function fsDrawTwoColumnRow(
   ctx: FsDrawCtx,
-  text: string,
-  size: number,
-  font: PDFFont,
-  color: ReturnType<typeof rgb>,
-  maxW: number,
+  label: string,
+  value: string,
 ): FsDrawCtx {
-  const lines = wrapText(text, font, size, maxW);
-  const lineH = size + 2.5;
-  const h = lines.length * lineH;
-  ctx = fsEnsureSpace(ctx, h + 2);
-  for (let i = 0; i < lines.length; i++) {
-    ctx.page.drawText(lines[i], {
-      x: FS_MARGIN,
-      y: ctx.y - size - i * lineH,
+  const size = FS_CELL_SIZE;
+  const pad = FS_CELL_PAD;
+  const gap = FS_COL_GAP;
+  const labelW = FS_LABEL_COL_W;
+  const valueW = FS_CONTENT_W - labelW - gap;
+  const labelMaxW = labelW - pad * 2;
+  const valueMaxW = valueW - pad * 2;
+  const display = value.trim() ? value : "—";
+
+  const labelLines = wrapText(label, ctx.boldFont, size, labelMaxW);
+  const valueLines = wrapText(display, ctx.font, size, valueMaxW);
+  const lineH = size + 3;
+  const innerH = Math.max(labelLines.length, valueLines.length) * lineH;
+  const rowH = innerH + pad * 2;
+
+  ctx = fsEnsureSpace(ctx, rowH + FS_ROW_GAP + 2);
+  const topY = ctx.y;
+  const bottomY = topY - rowH;
+  const { page } = ctx;
+
+  page.drawRectangle({
+    x: FS_MARGIN,
+    y: bottomY,
+    width: labelW,
+    height: rowH,
+    color: FS_LABEL_BG,
+    borderColor: FS_BORDER,
+    borderWidth: 0.65,
+    borderDashArray: FS_DASH,
+  });
+  page.drawRectangle({
+    x: FS_MARGIN + labelW + gap,
+    y: bottomY,
+    width: valueW,
+    height: rowH,
+    color: FS_VALUE_BG,
+    borderColor: FS_BORDER,
+    borderWidth: 0.65,
+    borderDashArray: FS_DASH,
+  });
+
+  const labelTopBaseline = topY - pad - size;
+  for (let i = 0; i < labelLines.length; i++) {
+    const line = labelLines[i]!;
+    const lw = ctx.boldFont.widthOfTextAtSize(line, size);
+    page.drawText(line, {
+      x: FS_MARGIN + labelW - pad - lw,
+      y: labelTopBaseline - i * lineH,
       size,
-      font,
-      color,
+      font: ctx.boldFont,
+      color: FS_TEXT,
     });
   }
-  return { ...ctx, y: ctx.y - h - 4 };
+
+  const valueX = FS_MARGIN + labelW + gap + pad;
+  const valueTopBaseline = topY - pad - size;
+  for (let i = 0; i < valueLines.length; i++) {
+    page.drawText(valueLines[i]!, {
+      x: valueX,
+      y: valueTopBaseline - i * lineH,
+      size,
+      font: ctx.font,
+      color: FS_TEXT,
+    });
+  }
+
+  return { ...ctx, y: bottomY - FS_ROW_GAP };
+}
+
+/** One gray block with dotted outline; bold “Label:” + wrapped value (Formstack header). */
+function fsDrawMetaBlock(
+  ctx: FsDrawCtx,
+  entries: { label: string; value: string }[],
+): FsDrawCtx {
+  const size = FS_CELL_SIZE;
+  const pad = 8;
+  const labelColW = 118;
+  const innerW = FS_CONTENT_W - 2 * pad;
+  const valueMaxW = innerW - labelColW - 6;
+  const lineH = size + 3;
+  const rowGap = 4;
+
+  type RowSpec = { label: string; valueLines: string[]; textBlockH: number };
+  const specs: RowSpec[] = [];
+  for (const { label, value } of entries) {
+    const lbl = label.endsWith(":") ? label : `${label}:`;
+    const valueLines = wrapText(
+      value.trim() ? value : "—",
+      ctx.font,
+      size,
+      valueMaxW,
+    );
+    const textBlockH = Math.max(1, valueLines.length) * lineH;
+    specs.push({ label: lbl, valueLines, textBlockH });
+  }
+
+  const totalTextH =
+    specs.reduce((sum, r) => sum + r.textBlockH, 0) +
+    (specs.length > 1 ? (specs.length - 1) * rowGap : 0);
+  const totalH = pad * 2 + totalTextH;
+
+  ctx = fsEnsureSpace(ctx, totalH + FS_SECTION_GAP);
+  const topY = ctx.y;
+  const bottomY = topY - totalH;
+  const { page } = ctx;
+
+  page.drawRectangle({
+    x: FS_MARGIN,
+    y: bottomY,
+    width: FS_CONTENT_W,
+    height: totalH,
+    color: FS_META_BG,
+    borderColor: FS_BORDER,
+    borderWidth: 0.65,
+    borderDashArray: FS_DASH,
+  });
+
+  const labelValueX = FS_MARGIN + pad + labelColW;
+  let yTop = topY - pad;
+  for (let si = 0; si < specs.length; si++) {
+    const spec = specs[si]!;
+    const baseline0 = yTop - size;
+    page.drawText(spec.label, {
+      x: FS_MARGIN + pad,
+      y: baseline0,
+      size,
+      font: ctx.boldFont,
+      color: FS_TEXT,
+    });
+    for (let i = 0; i < spec.valueLines.length; i++) {
+      page.drawText(spec.valueLines[i]!, {
+        x: labelValueX,
+        y: baseline0 - i * lineH,
+        size,
+        font: ctx.font,
+        color: FS_TEXT,
+      });
+    }
+    yTop -= spec.textBlockH;
+    if (si < specs.length - 1) yTop -= rowGap;
+  }
+
+  return { ...ctx, y: bottomY - FS_SECTION_GAP };
 }
 
 function fsSection(ctx: FsDrawCtx, title: string): FsDrawCtx {
-  ctx = fsGap(ctx, 10);
-  ctx = fsEnsureSpace(ctx, 16);
-  ctx.page.drawText(title, {
+  ctx = fsGap(ctx, 8);
+  const h = 22;
+  const size = 10;
+  ctx = fsEnsureSpace(ctx, h + FS_SECTION_GAP);
+  const topY = ctx.y;
+  const bottomY = topY - h;
+  const { page } = ctx;
+
+  page.drawRectangle({
     x: FS_MARGIN,
-    y: ctx.y - 11,
-    size: 10,
-    font: ctx.boldFont,
-    color: rgb(0, 0, 0),
+    y: bottomY,
+    width: FS_CONTENT_W,
+    height: h,
+    color: FS_LABEL_BG,
+    borderColor: FS_BORDER,
+    borderWidth: 0.65,
+    borderDashArray: FS_DASH,
   });
-  return { ...ctx, y: ctx.y - 18 };
+
+  const baseline = bottomY + (h - size) * 0.42;
+  page.drawText(title.toUpperCase(), {
+    x: FS_MARGIN + 8,
+    y: baseline,
+    size,
+    font: ctx.boldFont,
+    color: FS_TEXT,
+  });
+
+  return { ...ctx, y: bottomY - FS_SECTION_GAP };
 }
 
-function fsField(ctx: FsDrawCtx, label: string, value: string): FsDrawCtx {
-  const line = value ? `${label} ${value}` : label;
-  return fsDrawWrapped(ctx, line, 9, ctx.font, rgb(0.08, 0.08, 0.08), FS_CONTENT_W);
-}
-
-/** Plain “Formstack Default” style submission PDF for HubSpot file property `form_result__client_email`. */
+/** Formstack-style submission PDF (gray cells, dotted borders) for HubSpot `form_result__client_email`. */
 export async function buildFormstackDefaultDataStylePDF(
   data: FormData,
 ): Promise<Uint8Array> {
@@ -435,60 +591,52 @@ export async function buildFormstackDefaultDataStylePDF(
     ) === "YES";
 
   const formName = str(data, "Form Name") || "Default";
-  const submissionTime =
-    str(data, "Submission Time") ||
-    new Date().toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
+  const submissionTime = new Date().toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
   const browser = str(data, "Browser");
   const ip = str(data, "IP Address");
   const uniqueId = str(data, "Unique ID");
   const location = str(data, "Location");
 
-  ctx = fsDrawWrapped(
-    ctx,
-    `Form Name: ${formName}`,
-    9,
-    font,
-    rgb(0, 0, 0),
-    FS_CONTENT_W,
-  );
-  ctx = fsDrawWrapped(
-    ctx,
-    `Submission Time: ${submissionTime}`,
-    9,
-    font,
-    rgb(0, 0, 0),
-    FS_CONTENT_W,
-  );
-  if (browser)
-    ctx = fsDrawWrapped(ctx, `Browser: ${browser}`, 9, font, rgb(0, 0, 0), FS_CONTENT_W);
-  if (ip)
-    ctx = fsDrawWrapped(ctx, `IP Address: ${ip}`, 9, font, rgb(0, 0, 0), FS_CONTENT_W);
-  if (uniqueId)
-    ctx = fsDrawWrapped(ctx, `Unique ID: ${uniqueId}`, 9, font, rgb(0, 0, 0), FS_CONTENT_W);
-  if (location)
-    ctx = fsDrawWrapped(ctx, `Location: ${location}`, 9, font, rgb(0, 0, 0), FS_CONTENT_W);
+  const metaEntries: { label: string; value: string }[] = [
+    { label: "Form Name", value: formName },
+    { label: "Submission Time", value: submissionTime },
+  ];
+  if (browser) metaEntries.push({ label: "Browser", value: browser });
+  if (ip) metaEntries.push({ label: "IP Address", value: ip });
+  if (uniqueId) metaEntries.push({ label: "Unique ID", value: uniqueId });
+  if (location) metaEntries.push({ label: "Location", value: location });
+  ctx = fsDrawMetaBlock(ctx, metaEntries);
 
   ctx = fsSection(ctx, "AGENT INFO");
-  ctx = fsField(ctx, "HubSpot Deal ID", str(data, "HubSpot Deal ID"));
-  ctx = fsField(ctx, "HubSpot Deal Name", str(data, "HubSpot Deal Name"));
-  ctx = fsField(ctx, "Amount of deals on contact", str(data, "Amount of deals on contact"));
-  ctx = fsField(ctx, "Form Type", str(data, "Form Type"));
-  ctx = fsField(ctx, "Agent Name", str(data, "Agent Name"));
-  ctx = fsField(ctx, "Agency Name", str(data, "Agency Name"));
-  ctx = fsField(ctx, "Email", str(data, "Email"));
+  ctx = fsDrawTwoColumnRow(ctx, "HubSpot Deal ID", str(data, "HubSpot Deal ID"));
+  ctx = fsDrawTwoColumnRow(ctx, "HubSpot Deal Name", str(data, "HubSpot Deal Name"));
+  ctx = fsDrawTwoColumnRow(
+    ctx,
+    "Amount of deals on contact",
+    str(data, "Amount of deals on contact"),
+  );
+  ctx = fsDrawTwoColumnRow(ctx, "Form Type", str(data, "Form Type"));
+  ctx = fsDrawTwoColumnRow(ctx, "Agent Name", str(data, "Agent Name"));
+  ctx = fsDrawTwoColumnRow(ctx, "Agency Name", str(data, "Agency Name"));
+  ctx = fsDrawTwoColumnRow(ctx, "Email", str(data, "Email"));
   if (amountOfDeals === 1) {
     const agencyAddr = str(data, "Please provide your agency address");
     if (agencyAddr)
-      ctx = fsField(ctx, "Please provide your agency address", agencyAddr);
+      ctx = fsDrawTwoColumnRow(
+        ctx,
+        "Please provide your agency address",
+        agencyAddr,
+      );
   }
-  ctx = fsField(
+  ctx = fsDrawTwoColumnRow(
     ctx,
     "Is the mailing address for commission check the same as the agency address?",
     str(
@@ -496,38 +644,43 @@ export async function buildFormstackDefaultDataStylePDF(
       "Is the mailing address for commission check the same as the agency address?",
     ),
   );
-  ctx = fsField(
+  ctx = fsDrawTwoColumnRow(
     ctx,
     "Is the commission's check payable name the same as the agency name?",
     str(data, "Is the commission's check payable name the same as the agency name?"),
   );
   if (!mailingAddressSame) {
     const mailingAddr = str(data, "Mailing Address");
-    if (mailingAddr) ctx = fsField(ctx, "Mailing Address", mailingAddr);
+    if (mailingAddr) ctx = fsDrawTwoColumnRow(ctx, "Mailing Address", mailingAddr);
   }
   if (!checkPayableSame) {
     const checkPayable = str(data, "Check Payable to");
-    if (checkPayable) ctx = fsField(ctx, "Check Payable to", checkPayable);
+    if (checkPayable)
+      ctx = fsDrawTwoColumnRow(ctx, "Check Payable to", checkPayable);
   }
 
   ctx = fsSection(ctx, "PAYMENT INFO");
-  ctx = fsField(ctx, "Form of payment", str(data, "Form of payment"));
-  ctx = fsGap(ctx, 8);
-  ctx = fsField(ctx, "Number of passengers", str(data, "Number of passengers"));
+  ctx = fsDrawTwoColumnRow(ctx, "Form of payment", str(data, "Form of payment"));
+  ctx = fsGap(ctx, 4);
+  ctx = fsDrawTwoColumnRow(
+    ctx,
+    "Number of passengers",
+    str(data, "Number of passengers"),
+  );
 
   for (let i = 1; i <= FS_MAX_PASSENGERS; i++) {
     ctx = fsSection(ctx, `PASSENGER ${i} INFO`);
     if (i <= numPassengers) {
       const name = str(data, `Passenger ${i} Name`);
-      if (name) ctx = fsField(ctx, `Passenger Name ${i}`, name);
+      if (name) ctx = fsDrawTwoColumnRow(ctx, `Passenger Name ${i}`, name);
       const seat = str(data, `Passenger ${i} Seat Preference`);
       const ff = str(data, `Passenger ${i} Frequent Flyer #`);
       const kt = str(data, `Passenger ${i} Known Traveler #`);
       const special = str(data, `Passenger ${i} Special Requests`);
-      if (seat) ctx = fsField(ctx, "Seat Preference", seat);
-      if (ff) ctx = fsField(ctx, "Frequent Flyer #", ff);
-      if (kt) ctx = fsField(ctx, "Known Traveler #", kt);
-      if (special) ctx = fsField(ctx, "Special Requests", special);
+      if (seat) ctx = fsDrawTwoColumnRow(ctx, "Seat Preference", seat);
+      if (ff) ctx = fsDrawTwoColumnRow(ctx, "Frequent Flyer #", ff);
+      if (kt) ctx = fsDrawTwoColumnRow(ctx, "Known Traveler #", kt);
+      if (special) ctx = fsDrawTwoColumnRow(ctx, "Special Requests", special);
     }
   }
 
@@ -535,8 +688,8 @@ export async function buildFormstackDefaultDataStylePDF(
   const reservationDetails = str(data, "Reservation Details");
   const penalties = str(data, "Penalties");
   if (reservationDetails)
-    ctx = fsField(ctx, "Reservation Details", reservationDetails);
-  if (penalties) ctx = fsField(ctx, "Penalties", penalties);
+    ctx = fsDrawTwoColumnRow(ctx, "Reservation Details", reservationDetails);
+  if (penalties) ctx = fsDrawTwoColumnRow(ctx, "Penalties", penalties);
 
   ctx = fsSection(ctx, "FARE BREAKDOWN");
   const ratePerPerson = str(data, "RATE PER PERSON");
@@ -550,25 +703,30 @@ export async function buildFormstackDefaultDataStylePDF(
   const totalAuthorized = str(data, "= TOTAL AUTHORIZED TO CHARGE PP*");
 
   if (!isFora && present(ratePerPerson))
-    ctx = fsField(ctx, "RATE PER PERSON", currency(ratePerPerson));
+    ctx = fsDrawTwoColumnRow(ctx, "RATE PER PERSON", currency(ratePerPerson));
   if (isFora && present(basePerPerson))
-    ctx = fsField(ctx, "Base Per Person", currency(basePerPerson));
+    ctx = fsDrawTwoColumnRow(ctx, "Base Per Person", currency(basePerPerson));
   if (isFora && present(taxesAndFees))
-    ctx = fsField(ctx, "Taxes and Fees Per Person", currency(taxesAndFees));
-  if (present(issuingFee)) ctx = fsField(ctx, "Issuing Fee", currency(issuingFee));
+    ctx = fsDrawTwoColumnRow(ctx, "Taxes and Fees Per Person", currency(taxesAndFees));
+  if (present(issuingFee))
+    ctx = fsDrawTwoColumnRow(ctx, "Issuing Fee", currency(issuingFee));
   if (present(commissionPP))
-    ctx = fsField(ctx, "+ COMMISSION PP", currency(commissionPP));
+    ctx = fsDrawTwoColumnRow(ctx, "+ COMMISSION PP", currency(commissionPP));
   if (present(totalPerPerson))
-    ctx = fsField(ctx, "Total Per Person", currency(totalPerPerson));
+    ctx = fsDrawTwoColumnRow(ctx, "Total Per Person", currency(totalPerPerson));
   if (present(ccFee))
-    ctx = fsField(ctx, "+ 3.5% CC FEE (NON-REFUNDABLE)", currency(ccFee));
+    ctx = fsDrawTwoColumnRow(ctx, "+ 3.5% CC FEE (NON-REFUNDABLE)", currency(ccFee));
   if (present(totalAuthorized))
-    ctx = fsField(ctx, "= TOTAL AUTHORIZED TO CHARGE PP*", currency(totalAuthorized));
+    ctx = fsDrawTwoColumnRow(
+      ctx,
+      "= TOTAL AUTHORIZED TO CHARGE PP*",
+      currency(totalAuthorized),
+    );
   if (!isFora) {
     const t = str(data, "Total");
-    ctx = fsField(ctx, "Total", present(t) ? currency(t) : currency("0"));
+    ctx = fsDrawTwoColumnRow(ctx, "Total", present(t) ? currency(t) : currency("0"));
   } else if (present(total)) {
-    ctx = fsField(ctx, "Total", currency(total));
+    ctx = fsDrawTwoColumnRow(ctx, "Total", currency(total));
   }
 
   const pages = doc.getPages();
