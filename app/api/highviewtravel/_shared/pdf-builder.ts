@@ -606,17 +606,14 @@ export async function buildFormstackDefaultDataStylePDF(
   /** Same as `submissionID` in the email HTML Formstack submission URL. */
   const submissionId = str(data, "submissionID");
 
-  if (submissionId) {
-    ctx = fsDrawTwoColumnRow(ctx, "Unique ID", submissionId);
-    ctx = fsGap(ctx, 6);
-  }
-
   const metaEntries: { label: string; value: string }[] = [
     { label: "Form Name", value: formName },
     { label: "Submission Time", value: submissionTime },
   ];
   if (browser) metaEntries.push({ label: "Browser", value: browser });
   if (ip) metaEntries.push({ label: "IP Address", value: ip });
+  if (submissionId)
+    metaEntries.push({ label: "Unique ID", value: submissionId });
   if (location) metaEntries.push({ label: "Location", value: location });
   ctx = fsDrawMetaBlock(ctx, metaEntries);
 
