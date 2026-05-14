@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseFormPDFBody } from "../_shared/parse-form-body";
 import {
+  buildFormstackDefaultDataStylePDF,
   buildPDF,
   parseSafeFileName,
   str,
@@ -11,6 +12,8 @@ import {
 const HUBSPOT_TICKETING_PIPELINE_ID = "9038862";
 /** Same API — stage "FORM RECEIVED/SEND IN SALE" within Ticketing */
 const HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID = "25756531";
+/** Deal file property internal name — Formstack-style default data PDF */
+const HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY = "form_result__client_email";
 
 function currency(value: string): string {
   const n = parseFloat(value);
@@ -389,19 +392,47 @@ export async function POST(request: NextRequest) {
       `[submitFormPDF] Uploaded successfully: ${fileUrl} (id=${fileId})`,
     );
 
-    const previous = await fetchDealFileProperty(dealId, property, token);
+    const formstackFileName = `${parseSafeFileName(dealName)}_default_data.pdf`;
+    console.log(
+      `[submitFormPDF] Generating Formstack-style PDF for deal ${dealId} (${dealName})`,
+    );
+    const formstackPdfBytes = await buildFormstackDefaultDataStylePDF(data);
+    console.log(
+      `[submitFormPDF] Uploading ${formstackFileName} to HubSpot Files`,
+    );
+    const {
+      id: formstackFileId,
+      url: formstackFileUrl,
+    } = await uploadFileToHubSpot(formstackPdfBytes, formstackFileName, token);
+    console.log(
+      `[submitFormPDF] Formstack-style PDF uploaded: ${formstackFileUrl} (id=${formstackFileId})`,
+    );
+
+    const [previous, previousFormstack] = await Promise.all([
+      fetchDealFileProperty(dealId, property, token),
+      fetchDealFileProperty(
+        dealId,
+        HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY,
+        token,
+      ),
+    ]);
     const propertyValue = mergeDealFilePropertyValue(previous, fileId);
+    const formstackPropertyValue = mergeDealFilePropertyValue(
+      previousFormstack,
+      formstackFileId,
+    );
     const emailHtml = buildEmailHtml(data, dealName, dealId);
 
-    // 3. File property + Ticketing / FORM RECEIVED/SEND IN SALE (single PATCH)
+    // 3. File properties + Ticketing / FORM RECEIVED/SEND IN SALE (single PATCH)
     const dealProps: Record<string, string> = {
       [property]: propertyValue,
+      [HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY]: formstackPropertyValue,
       pipeline: HUBSPOT_TICKETING_PIPELINE_ID,
       dealstage: HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID,
     };
 
     console.log(
-      `[submitFormPDF] Updating deal ${dealId} → pipeline ${HUBSPOT_TICKETING_PIPELINE_ID}, stage ${HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID}; property "${property}"`,
+      `[submitFormPDF] Updating deal ${dealId} → pipeline ${HUBSPOT_TICKETING_PIPELINE_ID}, stage ${HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID}; properties "${property}", "${HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY}"`,
     );
     await patchDealProperties(dealId, dealProps, token);
     console.log(`[submitFormPDF] Deal updated successfully`);
@@ -413,6 +444,9 @@ export async function POST(request: NextRequest) {
       fileId,
       fileUrl,
       property,
+      formstackFileId,
+      formstackFileUrl,
+      formstackPdfProperty: HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY,
       pipelineId: HUBSPOT_TICKETING_PIPELINE_ID,
       dealStageId: HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID,
       emailHtml,

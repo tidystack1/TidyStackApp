@@ -334,3 +334,256 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
 
   return doc.save();
 }
+
+// ─── Formstack “Default Data” style PDF (plain text dump, like Formstack export) ─
+
+const FS_PAGE_W = 612;
+const FS_PAGE_H = 792;
+const FS_MARGIN = 54;
+const FS_CONTENT_W = FS_PAGE_W - FS_MARGIN * 2;
+const FS_MAX_PASSENGERS = 9;
+
+interface FsDrawCtx {
+  page: ReturnType<PDFDocument["addPage"]>;
+  font: PDFFont;
+  boldFont: PDFFont;
+  y: number;
+  doc: PDFDocument;
+}
+
+function fsEnsureSpace(ctx: FsDrawCtx, needed: number): FsDrawCtx {
+  if (ctx.y - needed < FS_MARGIN + 28) {
+    const page = ctx.doc.addPage([FS_PAGE_W, FS_PAGE_H]);
+    return { ...ctx, page, y: FS_PAGE_H - FS_MARGIN };
+  }
+  return ctx;
+}
+
+function fsGap(ctx: FsDrawCtx, n = 6): FsDrawCtx {
+  return { ...ctx, y: ctx.y - n };
+}
+
+function fsDrawWrapped(
+  ctx: FsDrawCtx,
+  text: string,
+  size: number,
+  font: PDFFont,
+  color: ReturnType<typeof rgb>,
+  maxW: number,
+): FsDrawCtx {
+  const lines = wrapText(text, font, size, maxW);
+  const lineH = size + 2.5;
+  const h = lines.length * lineH;
+  ctx = fsEnsureSpace(ctx, h + 2);
+  for (let i = 0; i < lines.length; i++) {
+    ctx.page.drawText(lines[i], {
+      x: FS_MARGIN,
+      y: ctx.y - size - i * lineH,
+      size,
+      font,
+      color,
+    });
+  }
+  return { ...ctx, y: ctx.y - h - 4 };
+}
+
+function fsSection(ctx: FsDrawCtx, title: string): FsDrawCtx {
+  ctx = fsGap(ctx, 10);
+  ctx = fsEnsureSpace(ctx, 16);
+  ctx.page.drawText(title, {
+    x: FS_MARGIN,
+    y: ctx.y - 11,
+    size: 10,
+    font: ctx.boldFont,
+    color: rgb(0, 0, 0),
+  });
+  return { ...ctx, y: ctx.y - 18 };
+}
+
+function fsField(ctx: FsDrawCtx, label: string, value: string): FsDrawCtx {
+  const line = value ? `${label} ${value}` : label;
+  return fsDrawWrapped(ctx, line, 9, ctx.font, rgb(0.08, 0.08, 0.08), FS_CONTENT_W);
+}
+
+/** Plain “Formstack Default” style submission PDF for HubSpot file property `form_result__client_email`. */
+export async function buildFormstackDefaultDataStylePDF(
+  data: FormData,
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  const page = doc.addPage([FS_PAGE_W, FS_PAGE_H]);
+  let ctx: FsDrawCtx = { page, font, boldFont, y: FS_PAGE_H - FS_MARGIN, doc };
+
+  const formType = str(data, "Form Type");
+  const isFora = formType === "Fora";
+  const numPassengers = inferPassengerCount(data);
+  const amountOfDeals = parseInt(
+    str(data, "Amount of deals on contact") || "0",
+    10,
+  );
+  const mailingAddressSame =
+    str(
+      data,
+      "Is the mailing address for commission check the same as the agency address?",
+    ) === "YES";
+  const checkPayableSame =
+    str(
+      data,
+      "Is the commission's check payable name the same as the agency name?",
+    ) === "YES";
+
+  const formName = str(data, "Form Name") || "Default";
+  const submissionTime =
+    str(data, "Submission Time") ||
+    new Date().toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  const browser = str(data, "Browser");
+  const ip = str(data, "IP Address");
+  const uniqueId = str(data, "Unique ID");
+  const location = str(data, "Location");
+
+  ctx = fsDrawWrapped(
+    ctx,
+    `Form Name: ${formName}`,
+    9,
+    font,
+    rgb(0, 0, 0),
+    FS_CONTENT_W,
+  );
+  ctx = fsDrawWrapped(
+    ctx,
+    `Submission Time: ${submissionTime}`,
+    9,
+    font,
+    rgb(0, 0, 0),
+    FS_CONTENT_W,
+  );
+  if (browser)
+    ctx = fsDrawWrapped(ctx, `Browser: ${browser}`, 9, font, rgb(0, 0, 0), FS_CONTENT_W);
+  if (ip)
+    ctx = fsDrawWrapped(ctx, `IP Address: ${ip}`, 9, font, rgb(0, 0, 0), FS_CONTENT_W);
+  if (uniqueId)
+    ctx = fsDrawWrapped(ctx, `Unique ID: ${uniqueId}`, 9, font, rgb(0, 0, 0), FS_CONTENT_W);
+  if (location)
+    ctx = fsDrawWrapped(ctx, `Location: ${location}`, 9, font, rgb(0, 0, 0), FS_CONTENT_W);
+
+  ctx = fsSection(ctx, "AGENT INFO");
+  ctx = fsField(ctx, "HubSpot Deal ID", str(data, "HubSpot Deal ID"));
+  ctx = fsField(ctx, "HubSpot Deal Name", str(data, "HubSpot Deal Name"));
+  ctx = fsField(ctx, "Amount of deals on contact", str(data, "Amount of deals on contact"));
+  ctx = fsField(ctx, "Form Type", str(data, "Form Type"));
+  ctx = fsField(ctx, "Agent Name", str(data, "Agent Name"));
+  ctx = fsField(ctx, "Agency Name", str(data, "Agency Name"));
+  ctx = fsField(ctx, "Email", str(data, "Email"));
+  if (amountOfDeals === 1) {
+    const agencyAddr = str(data, "Please provide your agency address");
+    if (agencyAddr)
+      ctx = fsField(ctx, "Please provide your agency address", agencyAddr);
+  }
+  ctx = fsField(
+    ctx,
+    "Is the mailing address for commission check the same as the agency address?",
+    str(
+      data,
+      "Is the mailing address for commission check the same as the agency address?",
+    ),
+  );
+  ctx = fsField(
+    ctx,
+    "Is the commission's check payable name the same as the agency name?",
+    str(data, "Is the commission's check payable name the same as the agency name?"),
+  );
+  if (!mailingAddressSame) {
+    const mailingAddr = str(data, "Mailing Address");
+    if (mailingAddr) ctx = fsField(ctx, "Mailing Address", mailingAddr);
+  }
+  if (!checkPayableSame) {
+    const checkPayable = str(data, "Check Payable to");
+    if (checkPayable) ctx = fsField(ctx, "Check Payable to", checkPayable);
+  }
+
+  ctx = fsSection(ctx, "PAYMENT INFO");
+  ctx = fsField(ctx, "Form of payment", str(data, "Form of payment"));
+  ctx = fsGap(ctx, 8);
+  ctx = fsField(ctx, "Number of passengers", str(data, "Number of passengers"));
+
+  for (let i = 1; i <= FS_MAX_PASSENGERS; i++) {
+    ctx = fsSection(ctx, `PASSENGER ${i} INFO`);
+    if (i <= numPassengers) {
+      const name = str(data, `Passenger ${i} Name`);
+      if (name) ctx = fsField(ctx, `Passenger Name ${i}`, name);
+      const seat = str(data, `Passenger ${i} Seat Preference`);
+      const ff = str(data, `Passenger ${i} Frequent Flyer #`);
+      const kt = str(data, `Passenger ${i} Known Traveler #`);
+      const special = str(data, `Passenger ${i} Special Requests`);
+      if (seat) ctx = fsField(ctx, "Seat Preference", seat);
+      if (ff) ctx = fsField(ctx, "Frequent Flyer #", ff);
+      if (kt) ctx = fsField(ctx, "Known Traveler #", kt);
+      if (special) ctx = fsField(ctx, "Special Requests", special);
+    }
+  }
+
+  ctx = fsSection(ctx, "RESERVATION INFO");
+  const reservationDetails = str(data, "Reservation Details");
+  const penalties = str(data, "Penalties");
+  if (reservationDetails)
+    ctx = fsField(ctx, "Reservation Details", reservationDetails);
+  if (penalties) ctx = fsField(ctx, "Penalties", penalties);
+
+  ctx = fsSection(ctx, "FARE BREAKDOWN");
+  const ratePerPerson = str(data, "RATE PER PERSON");
+  const basePerPerson = str(data, "Base Per Person");
+  const issuingFee = str(data, "Issuing Fee");
+  const commissionPP = str(data, "+ COMMISSION PP");
+  const taxesAndFees = str(data, "Taxes and Fees Per Person");
+  const totalPerPerson = str(data, "Total Per Person");
+  const total = str(data, "Total");
+  const ccFee = str(data, "+ 3.5% CC FEE (NON-REFUNDABLE)");
+  const totalAuthorized = str(data, "= TOTAL AUTHORIZED TO CHARGE PP*");
+
+  if (!isFora && present(ratePerPerson))
+    ctx = fsField(ctx, "RATE PER PERSON", currency(ratePerPerson));
+  if (isFora && present(basePerPerson))
+    ctx = fsField(ctx, "Base Per Person", currency(basePerPerson));
+  if (isFora && present(taxesAndFees))
+    ctx = fsField(ctx, "Taxes and Fees Per Person", currency(taxesAndFees));
+  if (present(issuingFee)) ctx = fsField(ctx, "Issuing Fee", currency(issuingFee));
+  if (present(commissionPP))
+    ctx = fsField(ctx, "+ COMMISSION PP", currency(commissionPP));
+  if (present(totalPerPerson))
+    ctx = fsField(ctx, "Total Per Person", currency(totalPerPerson));
+  if (present(ccFee))
+    ctx = fsField(ctx, "+ 3.5% CC FEE (NON-REFUNDABLE)", currency(ccFee));
+  if (present(totalAuthorized))
+    ctx = fsField(ctx, "= TOTAL AUTHORIZED TO CHARGE PP*", currency(totalAuthorized));
+  if (!isFora) {
+    const t = str(data, "Total");
+    ctx = fsField(ctx, "Total", present(t) ? currency(t) : currency("0"));
+  } else if (present(total)) {
+    ctx = fsField(ctx, "Total", currency(total));
+  }
+
+  const pages = doc.getPages();
+  const pageCount = pages.length;
+  pages.forEach((p, idx) => {
+    const footer = `-- ${idx + 1} of ${pageCount} --`;
+    const w = font.widthOfTextAtSize(footer, 8);
+    p.drawText(footer, {
+      x: (FS_PAGE_W - w) / 2,
+      y: FS_MARGIN - 8,
+      size: 8,
+      font,
+      color: rgb(0.35, 0.35, 0.35),
+    });
+  });
+
+  return doc.save();
+}
