@@ -1,12 +1,13 @@
 import { randomBytes } from "crypto";
-import { readFile } from "fs/promises";
-import path from "path";
+// import { readFile } from "fs/promises";
+// import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 
-/** Embedded signature image (extracted from the reference `.eml` in this folder). */
-const SIGNATURE_PNG_FILE = "booking-email-signature.png";
-/** Content-ID for `multipart/related` — must match `cid:` in HTML. */
-const SIGNATURE_CID = "booking-signature@highviewtravel.local";
+// PNG signature (booking-email-signature.png in this folder) — not embedded in .eml at the moment.
+// /** Embedded signature image (extracted from the reference `.eml` in this folder). */
+// const SIGNATURE_PNG_FILE = "booking-email-signature.png";
+// /** Content-ID for `multipart/related` — must match `cid:` in HTML. */
+// const SIGNATURE_CID = "booking-signature@highviewtravel.local";
 
 /** HubSpot deal property for the booking-link `.eml` attachment (internal name). */
 const DEFAULT_FORM_EMAIL_DEAL_PROPERTY = "form_email_attachment";
@@ -145,42 +146,39 @@ function withLineBreaksHtml(value: string): string {
   return escapeHtml(value).replaceAll(/\r?\n/g, "<br/>");
 }
 
-function toBase64MimeLines(buf: Buffer): string {
-  const b64 = buf.toString("base64");
-  const CRLF = "\r\n";
-  const lines: string[] = [];
-  for (let i = 0; i < b64.length; i += 76) {
-    lines.push(b64.slice(i, i + 76));
-  }
-  return lines.join(CRLF);
-}
-
-async function loadSignaturePng(): Promise<Buffer> {
-  const filePath = path.join(
-    process.cwd(),
-    "app",
-    "api",
-    "highviewtravel",
-    "generateEmailFile",
-    SIGNATURE_PNG_FILE,
-  );
-  return readFile(filePath);
-}
+// PNG signature — not using at the moment (see commented block in buildBookingLinkEml).
+// function toBase64MimeLines(buf: Buffer): string {
+//   const b64 = buf.toString("base64");
+//   const CRLF = "\r\n";
+//   const lines: string[] = [];
+//   for (let i = 0; i < b64.length; i += 76) {
+//     lines.push(b64.slice(i, i + 76));
+//   }
+//   return lines.join(CRLF);
+// }
+//
+// async function loadSignaturePng(): Promise<Buffer> {
+//   const filePath = path.join(
+//     process.cwd(),
+//     "app",
+//     "api",
+//     "highviewtravel",
+//     "generateEmailFile",
+//     SIGNATURE_PNG_FILE,
+//   );
+//   return readFile(filePath);
+// }
 
 /**
- * Builds a `.eml` matching the booking-link template (plain + HTML + inline
- * signature PNG), with dynamic reservation text and a form URL whose visible
- * anchor text is `link`.
+ * Builds a `.eml` matching the booking-link template (plain + HTML), with
+ * dynamic reservation text and a form URL whose visible anchor text is `link`.
  */
 function buildBookingLinkEml(
   reservationDetails: string,
   formLink: string,
-  signaturePng: Buffer,
 ): string {
   const CRLF = "\r\n";
-  const innerBoundary = `----=_Part_${randomBytes(16).toString("hex")}`;
-  const outerBoundary = `----=_Part_${randomBytes(16).toString("hex")}`;
-  const cid = SIGNATURE_CID;
+  const boundary = `----=_Part_${randomBytes(16).toString("hex")}`;
 
   const resPlain = reservationDetails.replace(/\r?\n/g, CRLF);
 
@@ -205,6 +203,7 @@ function buildBookingLinkEml(
     "Forms that come through by 5:45 pm will be issued same day. Otherwise, it'll",
     "be handled on the next business day.",
     "",
+    "INSERT SIGNATURE HERE",
     "",
     "Paste this on top of full conversation we had until flights were finalized",
   ].join(CRLF);
@@ -221,40 +220,26 @@ function buildBookingLinkEml(
 <p style="white-space:pre-wrap;margin:0;">${withLineBreaksHtml(reservationDetails)}</p>
 <p>Please ensure that the names and flights are booked correctly.</p>
 <p>Airlines do not allow name changes. We will not be responsible for any fees or fare differences that will occur if a reservation needs to be rebooked.</p>
-<p>If all is in order, here's the form <a href="${escapeHtmlAttr(formLink)}">link</a> to proceed with issuance:</p>
+<p>If all is in order, here's the form <a href="${escapeHtmlAttr(formLink)}">LINK</a> to proceed with issuance:</p>
 <p>The submission gives us consent that these flights will be paid in full.</p>
 <p><strong>Forms that come through by 5:45 pm will be issued same day. Otherwise, it'll be handled on the next business day.</strong></p>
-<p style="margin:12px 0 0;"><img border="0" width="407" height="107" style="max-width:100%;height:auto;width:407px" src="cid:${cid}" alt="Highview Travel" /></p>
+<p style="margin:12px 0 0;"><strong>INSERT SIGNATURE HERE</strong></p>
 <p>Paste this on top of full conversation we had until flights were finalized</p>
 </body>
 </html>`;
 
-  const alternativePart = [
-    `--${outerBoundary}`,
-    "Content-Type: multipart/alternative;",
-    `\tboundary="${innerBoundary}"`,
-    "",
-    `--${innerBoundary}`,
+  const mime = [
+    `--${boundary}`,
     "Content-Type: text/plain; charset=UTF-8",
     "Content-Transfer-Encoding: 8bit",
     "",
     plainBody,
-    `--${innerBoundary}`,
+    `--${boundary}`,
     "Content-Type: text/html; charset=UTF-8",
     "Content-Transfer-Encoding: 8bit",
     "",
     htmlBody,
-    `--${innerBoundary}--`,
-    "",
-    `--${outerBoundary}`,
-    "Content-Type: image/png;",
-    `\tname="${SIGNATURE_PNG_FILE}"`,
-    "Content-Transfer-Encoding: base64",
-    `Content-ID: <${cid}>`,
-    "",
-    toBase64MimeLines(signaturePng),
-    "",
-    `--${outerBoundary}--`,
+    `--${boundary}--`,
   ].join(CRLF);
 
   const headers = [
@@ -262,18 +247,20 @@ function buildBookingLinkEml(
     'From: "Lisa F" <lisa@highviewtravel.com>',
     "To: undisclosed-recipients:;",
     "Subject: this is the email we use when sending the booking link",
-    "Content-Type: multipart/related;",
-    '\ttype="multipart/alternative";',
-    `\tboundary="${outerBoundary}"`,
+    `Content-Type: multipart/alternative;`,
+    `\tboundary="${boundary}"`,
     "",
-    "This is a multipart message in MIME format.",
-    "",
-    alternativePart,
+    mime,
   ].join(CRLF);
 
   return headers + CRLF;
 }
 
+// PNG signature — not using at the moment. To re-enable booking-email-signature.png in the .eml:
+// uncomment SIGNATURE_* constants, fs/path imports, loadSignaturePng, toBase64MimeLines, and the
+// POST loader; change buildBookingLinkEml to accept signaturePng: Buffer; use multipart/related
+// (outer boundary) wrapping multipart/alternative (plain + html) plus an image/png part with
+// Content-ID matching <img src="cid:..."> in HTML (see git history for full implementation).
 function parsePayload(body: Record<string, unknown>): {
   reservationDetails: string;
   formLink: string;
@@ -317,8 +304,10 @@ export async function POST(request: NextRequest) {
     }
 
     const { reservationDetails, formLink, hubspotDealId } = parsed;
-    const signaturePng = await loadSignaturePng();
-    const eml = buildBookingLinkEml(reservationDetails, formLink, signaturePng);
+    // PNG signature — not using at the moment
+    // const signaturePng = await loadSignaturePng();
+    // const eml = buildBookingLinkEml(reservationDetails, formLink, signaturePng);
+    const eml = buildBookingLinkEml(reservationDetails, formLink);
     const emlBytes = Buffer.from(eml, "utf-8");
     const fileName = `deal_${hubspotDealId}_booking_link.eml`;
 
