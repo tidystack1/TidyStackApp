@@ -479,10 +479,7 @@ export async function POST(request: NextRequest) {
       fileId,
       fileUrl,
       property,
-      form_result_word_doc: {
-        fileId: wordFileId,
-        fileUrl: wordFileUrl,
-      },
+      form_result_word_doc: wordFileUrl,
       // formstackFileId,
       // formstackFileUrl,
       // formstackPdfProperty: HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY,
