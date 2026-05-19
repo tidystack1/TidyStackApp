@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { buildFormstackDefaultDataStyleDocx } from "../_shared/docx-builder";
 import { parseFormPDFBody } from "../_shared/parse-form-body";
 import {
   // buildFormstackDefaultDataStylePDF, // gray “client email” PDF — see commented block in POST
@@ -15,6 +16,8 @@ const HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID = "25756531";
 /** Deal file property internal name — gray Formstack-style PDF for client email (disabled in POST) */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- re-enable with commented gray-PDF block
 const HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY = "form_result__client_email";
+/** Deal file property — Formstack-style Word doc (Default Data layout) */
+const HUBSPOT_DEAL_FORM_RESULT_WORD_DOC_PROPERTY = "form_result_word_doc";
 
 function currency(value: string): string {
   const n = parseFloat(value);
@@ -281,19 +284,21 @@ async function fetchDealFileProperty(
 }
 
 /**
- * Upload a PDF file to HubSpot's File Manager.
+ * Upload a file to HubSpot's File Manager.
  * Returns the File Manager id and public URL.
  */
 async function uploadFileToHubSpot(
-  pdfBytes: Uint8Array,
+  fileBytes: Uint8Array,
   fileName: string,
+  mimeType: string,
   token: string,
+  folderPath = "/form-pdfs",
 ): Promise<{ id: string; url: string }> {
   const form = new FormData();
 
   form.append(
     "file",
-    new Blob([Buffer.from(pdfBytes)], { type: "application/pdf" }),
+    new Blob([Buffer.from(fileBytes)], { type: mimeType }),
     fileName,
   );
 
@@ -307,7 +312,7 @@ async function uploadFileToHubSpot(
     }),
   );
 
-  form.append("folderPath", "/form-pdfs");
+  form.append("folderPath", folderPath);
   form.append("fileName", fileName);
 
   const res = await fetch("https://api.hubapi.com/files/v3/files", {
@@ -375,22 +380,41 @@ export async function POST(request: NextRequest) {
 
     const dealName = str(data, "HubSpot Deal Name") || "booking";
     const fileName = `${parseSafeFileName(dealName)}_summary.pdf`;
+    const wordFileName = `${parseSafeFileName(dealName)}_default_data.docx`;
 
-    // 1. Generate the PDF
+    // 1. Generate the PDF and Word doc
     console.log(
       `[submitFormPDF] Generating PDF for deal ${dealId} (${dealName})`,
     );
     const pdfBytes = await buildPDF(data);
+
+    console.log(
+      `[submitFormPDF] Generating Word doc for deal ${dealId} (${dealName})`,
+    );
+    const docxBytes = await buildFormstackDefaultDataStyleDocx(data);
 
     // 2. Upload to HubSpot File Manager
     console.log(`[submitFormPDF] Uploading ${fileName} to HubSpot Files`);
     const { id: fileId, url: fileUrl } = await uploadFileToHubSpot(
       pdfBytes,
       fileName,
+      "application/pdf",
       token,
     );
     console.log(
       `[submitFormPDF] Uploaded successfully: ${fileUrl} (id=${fileId})`,
+    );
+
+    console.log(`[submitFormPDF] Uploading ${wordFileName} to HubSpot Files`);
+    const { id: wordFileId, url: wordFileUrl } = await uploadFileToHubSpot(
+      docxBytes,
+      wordFileName,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      token,
+      "/form-docx",
+    );
+    console.log(
+      `[submitFormPDF] Word doc uploaded: ${wordFileUrl} (id=${wordFileId})`,
     );
 
     // Gray Formstack-style PDF for client email (HubSpot `form_result__client_email`).
@@ -412,12 +436,21 @@ export async function POST(request: NextRequest) {
     // );
 
     const previous = await fetchDealFileProperty(dealId, property, token);
+    const previousWordDoc = await fetchDealFileProperty(
+      dealId,
+      HUBSPOT_DEAL_FORM_RESULT_WORD_DOC_PROPERTY,
+      token,
+    );
     // const previousFormstack = await fetchDealFileProperty(
     //   dealId,
     //   HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY,
     //   token,
     // );
     const propertyValue = mergeDealFilePropertyValue(previous, fileId);
+    const wordDocPropertyValue = mergeDealFilePropertyValue(
+      previousWordDoc,
+      wordFileId,
+    );
     // const formstackPropertyValue = mergeDealFilePropertyValue(
     //   previousFormstack,
     //   formstackFileId,
@@ -427,6 +460,7 @@ export async function POST(request: NextRequest) {
     // 3. File properties + Ticketing / FORM RECEIVED/SEND IN SALE (single PATCH)
     const dealProps: Record<string, string> = {
       [property]: propertyValue,
+      [HUBSPOT_DEAL_FORM_RESULT_WORD_DOC_PROPERTY]: wordDocPropertyValue,
       // [HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY]: formstackPropertyValue,
       pipeline: HUBSPOT_TICKETING_PIPELINE_ID,
       dealstage: HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID,
@@ -445,6 +479,10 @@ export async function POST(request: NextRequest) {
       fileId,
       fileUrl,
       property,
+      form_result_word_doc: {
+        fileId: wordFileId,
+        fileUrl: wordFileUrl,
+      },
       // formstackFileId,
       // formstackFileUrl,
       // formstackPdfProperty: HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY,
