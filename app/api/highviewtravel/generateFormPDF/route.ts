@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseFormPDFBody } from "../_shared/parse-form-body";
 import { buildPDF, parseSafeFileName } from "../_shared/pdf-builder";
 
+/** Preview/test only — returns the summary PDF inline. Production submits use `submitFormPDF`. */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as Record<string, unknown>;

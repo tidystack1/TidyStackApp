@@ -2,6 +2,11 @@ import { randomBytes } from "crypto";
 // import { readFile } from "fs/promises";
 // import path from "path";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  buildFormstackPrefillFields,
+  fetchFormstackPrefilledUrl,
+  parseGenerateEmailFormstackInput,
+} from "../_shared/formstack-prefill";
 
 // PNG signature (booking-email-signature.png in this folder) — not embedded in .eml at the moment.
 // /** Embedded signature image (extracted from the reference `.eml` in this folder). */
@@ -11,6 +16,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 /** HubSpot deal property for the booking-link `.eml` attachment (internal name). */
 const DEFAULT_FORM_EMAIL_DEAL_PROPERTY = "form_email_attachment";
+/** HubSpot deal property for the Formstack prefilled form URL. */
+const HUBSPOT_PREFILLED_LINK_PROPERTY = "prefilled_link";
+/** HubSpot radio — cleared after prefill so the workflow does not re-trigger. */
+const HUBSPOT_SEND_FORM_PROPERTY = "send_form";
 
 function getConfig() {
   const token = process.env.HIGHVIEWTRAVEL_HUBSPOT_ACCESS_TOKEN;
@@ -261,49 +270,42 @@ function buildBookingLinkEml(
 // POST loader; change buildBookingLinkEml to accept signaturePng: Buffer; use multipart/related
 // (outer boundary) wrapping multipart/alternative (plain + html) plus an image/png part with
 // Content-ID matching <img src="cid:..."> in HTML (see git history for full implementation).
-function parsePayload(body: Record<string, unknown>): {
-  reservationDetails: string;
-  formLink: string;
-  hubspotDealId: string;
-} | null {
-  const reservationDetails = String(body.reservationDetails ?? "").trim();
-  const formLinkRaw = String(body.formLink ?? "").trim();
-  const hubspotDealId = String(
-    body.hubspotDealId ?? body.hubSpotDealId ?? "",
-  ).trim();
-
-  if (!reservationDetails || !formLinkRaw || !hubspotDealId) return null;
-
-  let formLink: string;
-  try {
-    const u = new URL(formLinkRaw);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-    formLink = u.toString();
-  } catch {
-    return null;
-  }
-
-  return { reservationDetails, formLink, hubspotDealId };
-}
-
 export async function POST(request: NextRequest) {
   try {
     const { token, property } = getConfig();
 
     const body = (await request.json()) as Record<string, unknown>;
-    const parsed = parsePayload(body);
+    const parsed = parseGenerateEmailFormstackInput(body);
 
     if (!parsed) {
       return NextResponse.json(
         {
           error:
-            "Invalid payload: require reservationDetails, formLink (valid URL), and hubspotDealId",
+            "Invalid payload: require reservationDetails and hubspotDealId",
         },
         { status: 400 },
       );
     }
 
-    const { reservationDetails, formLink, hubspotDealId } = parsed;
+    const { reservationDetails, hubspotDealId } = parsed;
+
+    console.log(
+      `[generateEmailFile] Formstack prefill for deal ${hubspotDealId}`,
+    );
+    const prefillFields = buildFormstackPrefillFields(parsed);
+    const formLink = await fetchFormstackPrefilledUrl(prefillFields);
+
+    await patchDealProperties(
+      hubspotDealId,
+      {
+        [HUBSPOT_PREFILLED_LINK_PROPERTY]: formLink,
+        [HUBSPOT_SEND_FORM_PROPERTY]: "",
+      },
+      token,
+    );
+    console.log(
+      `[generateEmailFile] Deal ${hubspotDealId}: prefilled_link set, send_form cleared`,
+    );
     // PNG signature — not using at the moment
     // const signaturePng = await loadSignaturePng();
     // const eml = buildBookingLinkEml(reservationDetails, formLink, signaturePng);
@@ -338,6 +340,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       dealId: hubspotDealId,
+      prefilledUrl: formLink,
       fileId,
       fileUrl,
       property,
