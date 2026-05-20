@@ -208,31 +208,15 @@ export async function buildFormstackDefaultDataStyleDocx(
       "Is the commission's check payable name the same as the agency name?",
     ) === "YES";
 
-  const formName = str(data, "Form Name") || "Default";
-  const submissionTime = new Date().toLocaleString("en-US", {
-    timeZone: "America/New_York",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
   const browser = str(data, "Browser");
   const ip = str(data, "IP Address");
   const location = str(data, "Location");
-  const submissionId = str(data, "submissionID");
 
   const children: (Paragraph | Table)[] = [];
 
-  const metaEntries: { label: string; value: string }[] = [
-    { label: "Form Name", value: formName },
-    { label: "Submission Time", value: submissionTime },
-  ];
+  const metaEntries: { label: string; value: string }[] = [];
   if (browser) metaEntries.push({ label: "Browser", value: browser });
   if (ip) metaEntries.push({ label: "IP Address", value: ip });
-  if (submissionId)
-    metaEntries.push({ label: "Unique ID", value: submissionId });
   if (location) metaEntries.push({ label: "Location", value: location });
   for (const entry of metaEntries) {
     children.push(metaParagraph(entry.label, entry.value));
