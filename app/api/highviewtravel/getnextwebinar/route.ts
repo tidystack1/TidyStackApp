@@ -1,5 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: corsHeaders(),
+  });
+}
+
 /** Zoom webinar list item (from /users/me/webinars) */
 interface ZoomWebinar {
   id: string;
@@ -130,7 +145,7 @@ export async function POST(req: NextRequest) {
     const password = body.password;
 
     if (password !== process.env.HIGHVIEWTRAVEL_PASSWORD) {
-      return NextResponse.json({ error: "Invalid password" }, { status: 401 });
+      return NextResponse.json({ error: "Invalid password" }, { status: 401, headers: corsHeaders() });
     }
 
     const token = await getZoomAccessToken();
@@ -157,7 +172,7 @@ export async function POST(req: NextRequest) {
         webinar_id: null,
         is_today: 0,
         is_tomorrow: 0,
-      });
+      }, { headers: corsHeaders() });
     }
 
     const next = upcoming[0];
@@ -185,12 +200,12 @@ export async function POST(req: NextRequest) {
       is_today: startDateObj.toDateString() === now.toDateString() ? 1 : 0,
       is_tomorrow:
         startDateObj.toDateString() === tomorrow.toDateString() ? 1 : 0,
-    });
+    }, { headers: corsHeaders() });
   } catch (err) {
     console.error(err);
     return NextResponse.json(
       { error: "Failed to determine next webinar" },
-      { status: 500 },
+      { status: 500, headers: corsHeaders() },
     );
   }
 }
