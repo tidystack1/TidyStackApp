@@ -4,6 +4,7 @@ import { parseFormPDFBody } from "../_shared/parse-form-body";
 import {
   // buildFormstackDefaultDataStylePDF, // gray “client email” PDF — see commented block in POST
   buildPDF,
+  isForaBooking,
   parseSafeFileName,
   str,
   type FormData,
@@ -84,8 +85,7 @@ function buildEmailHtml(
   dealName: string,
   dealId: string,
 ): string {
-  const formType = str(data, "Form Type");
-  const isFora = formType === "Fora";
+  const isFora = isForaBooking(data);
   const numPassengers = inferPassengerCount(data);
   const amountOfDeals = parseInt(
     str(data, "Amount of deals on contact") || "0",

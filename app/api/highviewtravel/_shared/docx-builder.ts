@@ -11,7 +11,7 @@ import {
   TextRun,
   WidthType,
 } from "docx";
-import { str, type FormData } from "./pdf-builder";
+import { isForaBooking, str, type FormData } from "./pdf-builder";
 
 const FS_MAX_PASSENGERS = 9;
 const FS_LABEL_FILL = "EEEEEE";
@@ -190,8 +190,7 @@ function fieldTable(rows: { label: string; value: string }[]): Table {
 export async function buildFormstackDefaultDataStyleDocx(
   data: FormData,
 ): Promise<Uint8Array> {
-  const formType = str(data, "Form Type");
-  const isFora = formType === "Fora";
+  const isFora = isForaBooking(data);
   const numPassengers = inferPassengerCount(data);
   const amountOfDeals = parseInt(
     str(data, "Amount of deals on contact") || "0",

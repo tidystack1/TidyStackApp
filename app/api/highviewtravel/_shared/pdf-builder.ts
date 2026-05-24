@@ -12,6 +12,11 @@ export function str(data: FormData, key: string): string {
   return (data[key] ?? "").trim();
 }
 
+/** `"Is Fora"` is `"Yes"` or `"No"`; missing/null defaults to not Fora. */
+export function isForaBooking(data: FormData): boolean {
+  return str(data, "Is Fora").toUpperCase() === "YES";
+}
+
 function currency(value: string): string {
   const n = parseFloat(value);
   if (isNaN(n)) return value || "—";
@@ -173,8 +178,7 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
   const page = doc.addPage([PAGE_W, PAGE_H]);
   let ctx: DrawCtx = { page, font, boldFont, y: PAGE_H, doc };
 
-  const formType = str(data, "Form Type");
-  const isFora = formType === "Fora";
+  const isFora = isForaBooking(data);
   const numPassengers = inferPassengerCount(data);
   const amountOfDeals = parseInt(str(data, "Amount of deals on contact") || "0", 10);
   const mailingAddressSame = str(data, "Is the mailing address for commission check the same as the agency address?") === "YES";
@@ -572,8 +576,7 @@ export async function buildFormstackDefaultDataStylePDF(
   const page = doc.addPage([FS_PAGE_W, FS_PAGE_H]);
   let ctx: FsDrawCtx = { page, font, boldFont, y: FS_PAGE_H - FS_MARGIN, doc };
 
-  const formType = str(data, "Form Type");
-  const isFora = formType === "Fora";
+  const isFora = isForaBooking(data);
   const numPassengers = inferPassengerCount(data);
   const amountOfDeals = parseInt(
     str(data, "Amount of deals on contact") || "0",
