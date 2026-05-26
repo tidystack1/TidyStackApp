@@ -11,7 +11,12 @@ import {
   TextRun,
   WidthType,
 } from "docx";
-import { isForaBooking, str, type FormData } from "./pdf-builder";
+import {
+  isForaBooking,
+  isNetRateWithCcFeeForm,
+  str,
+  type FormData,
+} from "./pdf-builder";
 
 const FS_MAX_PASSENGERS = 9;
 const FS_LABEL_FILL = "EEEEEE";
@@ -294,10 +299,12 @@ export async function buildFormstackDefaultDataStyleDocx(
       const seat = str(data, `Passenger ${i} Seat Preference`);
       const ff = str(data, `Passenger ${i} Frequent Flyer #`);
       const kt = str(data, `Passenger ${i} Known Traveler #`);
+      const airline = str(data, `Passenger ${i} Airline`);
       const special = str(data, `Passenger ${i} Special Requests`);
       if (seat) passengerRows.push({ label: "Seat Preference", value: seat });
       if (ff) passengerRows.push({ label: "Frequent Flyer #", value: ff });
       if (kt) passengerRows.push({ label: "Known Traveler #", value: kt });
+      if (airline) passengerRows.push({ label: "Airline", value: airline });
       if (special)
         passengerRows.push({ label: "Special Requests", value: special });
     }
@@ -359,7 +366,7 @@ export async function buildFormstackDefaultDataStyleDocx(
       label: "+ 3.5% CC FEE (NON-REFUNDABLE)",
       value: currency(ccFee),
     });
-  if (present(totalAuthorized))
+  if (isNetRateWithCcFeeForm(data) && present(totalAuthorized))
     fareRows.push({
       label: "= TOTAL AUTHORIZED TO CHARGE PP*",
       value: currency(totalAuthorized),

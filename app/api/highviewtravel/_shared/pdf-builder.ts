@@ -17,6 +17,11 @@ export function isForaBooking(data: FormData): boolean {
   return str(data, "Is Fora").toUpperCase() === "YES";
 }
 
+/** Fare row "= TOTAL AUTHORIZED TO CHARGE PP*" applies only to this Form Type. */
+export function isNetRateWithCcFeeForm(data: FormData): boolean {
+  return str(data, "Form Type") === "Net Rate + CC Fee";
+}
+
 function currency(value: string): string {
   const n = parseFloat(value);
   if (isNaN(n)) return value || "—";
@@ -270,14 +275,16 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
       const seat    = str(data, `Passenger ${i} Seat Preference`);
       const ff      = str(data, `Passenger ${i} Frequent Flyer #`);
       const kt      = str(data, `Passenger ${i} Known Traveler #`);
+      const airline = str(data, `Passenger ${i} Airline`);
       const special = str(data, `Passenger ${i} Special Requests`);
 
       if (seat)    ctx = drawLabelValue(ctx, "Seat Preference:", seat,    { indent: 12 });
       if (ff)      ctx = drawLabelValue(ctx, "Frequent Flyer #:", ff,     { indent: 12 });
       if (kt)      ctx = drawLabelValue(ctx, "Known Traveler #:", kt,     { indent: 12 });
+      if (airline) ctx = drawLabelValue(ctx, "Airline:", airline,          { indent: 12 });
       if (special) ctx = drawLabelValue(ctx, "Special Requests:", special, { indent: 12 });
 
-      if (!seat && !ff && !kt && !special) {
+      if (!seat && !ff && !kt && !airline && !special) {
         ctx = drawLabelValue(ctx, "", "No additional details provided.", { indent: 12 });
       }
 
@@ -319,7 +326,7 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
   if (!isFora && present(total))          ctx = drawLabelValue(ctx, "Total:", currency(total), { bold: true });
   if (present(ccFee))                     ctx = drawLabelValue(ctx, "+ 3.5% CC Fee (non-refundable):", currency(ccFee));
 
-  if (present(totalAuthorized)) {
+  if (isNetRateWithCcFeeForm(data) && present(totalAuthorized)) {
     ctx = gap(ctx, 4);
     ctx = drawLabelValue(ctx, "= Total Authorized to Charge PP*:", currency(totalAuthorized), { bold: true, highlight: true });
     ctx = gap(ctx, 4);
@@ -681,10 +688,12 @@ export async function buildFormstackDefaultDataStylePDF(
       const seat = str(data, `Passenger ${i} Seat Preference`);
       const ff = str(data, `Passenger ${i} Frequent Flyer #`);
       const kt = str(data, `Passenger ${i} Known Traveler #`);
+      const airline = str(data, `Passenger ${i} Airline`);
       const special = str(data, `Passenger ${i} Special Requests`);
       if (seat) ctx = fsDrawTwoColumnRow(ctx, "Seat Preference", seat);
       if (ff) ctx = fsDrawTwoColumnRow(ctx, "Frequent Flyer #", ff);
       if (kt) ctx = fsDrawTwoColumnRow(ctx, "Known Traveler #", kt);
+      if (airline) ctx = fsDrawTwoColumnRow(ctx, "Airline", airline);
       if (special) ctx = fsDrawTwoColumnRow(ctx, "Special Requests", special);
     }
   }
@@ -721,7 +730,7 @@ export async function buildFormstackDefaultDataStylePDF(
     ctx = fsDrawTwoColumnRow(ctx, "Total Per Person", currency(totalPerPerson));
   if (present(ccFee))
     ctx = fsDrawTwoColumnRow(ctx, "+ 3.5% CC FEE (NON-REFUNDABLE)", currency(ccFee));
-  if (present(totalAuthorized))
+  if (isNetRateWithCcFeeForm(data) && present(totalAuthorized))
     ctx = fsDrawTwoColumnRow(
       ctx,
       "= TOTAL AUTHORIZED TO CHARGE PP*",

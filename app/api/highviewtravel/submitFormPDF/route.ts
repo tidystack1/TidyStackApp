@@ -5,6 +5,7 @@ import {
   // buildFormstackDefaultDataStylePDF, // gray “client email” PDF — see commented block in POST
   buildPDF,
   isForaBooking,
+  isNetRateWithCcFeeForm,
   parseSafeFileName,
   str,
   type FormData,
@@ -19,6 +20,8 @@ const HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID = "25756531";
 const HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY = "form_result__client_email";
 /** Deal file property — Formstack-style Word doc (Default Data layout) */
 const HUBSPOT_DEAL_FORM_RESULT_WORD_DOC_PROPERTY = "form_result_word_doc";
+/** Deal single-line text — set to "Completed" when form PDF is generated */
+const HUBSPOT_DEAL_LINK_STATUS_PROPERTY = "link_status";
 
 function currency(value: string): string {
   const n = parseFloat(value);
@@ -139,10 +142,12 @@ function buildEmailHtml(
     const seat = str(data, `Passenger ${i} Seat Preference`);
     const ff = str(data, `Passenger ${i} Frequent Flyer #`);
     const kt = str(data, `Passenger ${i} Known Traveler #`);
+    const airline = str(data, `Passenger ${i} Airline`);
     const special = str(data, `Passenger ${i} Special Requests`);
     if (seat) details.push(row("Seat Preference", seat));
     if (ff) details.push(row("Frequent Flyer #", ff));
     if (kt) details.push(row("Known Traveler #", kt));
+    if (airline) details.push(row("Airline", airline));
     if (special) details.push(row("Special Requests", special));
     if (details.length === 0)
       details.push(row("Details", "No additional details provided."));
@@ -177,7 +182,7 @@ function buildEmailHtml(
   if (!isFora && present(total)) fareRows.push(row("Total", currency(total)));
   if (present(ccFee))
     fareRows.push(row("+ 3.5% CC Fee (non-refundable)", currency(ccFee)));
-  if (present(totalAuthorized)) {
+  if (isNetRateWithCcFeeForm(data) && present(totalAuthorized)) {
     fareRows.push(
       row("= Total Authorized to Charge PP*", currency(totalAuthorized)),
     );
@@ -462,6 +467,7 @@ export async function POST(request: NextRequest) {
       [property]: propertyValue,
       [HUBSPOT_DEAL_FORM_RESULT_WORD_DOC_PROPERTY]: wordDocPropertyValue,
       // [HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY]: formstackPropertyValue,
+      [HUBSPOT_DEAL_LINK_STATUS_PROPERTY]: "Completed",
       pipeline: HUBSPOT_TICKETING_PIPELINE_ID,
       dealstage: HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID,
     };
