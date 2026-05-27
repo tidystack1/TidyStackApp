@@ -167,7 +167,7 @@ function buildEmailHtml(
   const ccFee = str(data, "+ 3.5% CC FEE (NON-REFUNDABLE)");
   const totalAuthorized = str(data, "= TOTAL AUTHORIZED TO CHARGE PP*");
 
-  if (!isFora && present(ratePerPerson))
+  if (present(ratePerPerson))
     fareRows.push(row("Rate Per Person", currency(ratePerPerson)));
   if (isFora && present(basePerPerson))
     fareRows.push(row("Base Per Person", currency(basePerPerson)));

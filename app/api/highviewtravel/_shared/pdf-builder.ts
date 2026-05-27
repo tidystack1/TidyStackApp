@@ -312,7 +312,7 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
   const ccFee          = str(data, "+ 3.5% CC FEE (NON-REFUNDABLE)");
   const totalAuthorized = str(data, "= TOTAL AUTHORIZED TO CHARGE PP*");
 
-  if (!isFora && present(ratePerPerson))  ctx = drawLabelValue(ctx, "Rate Per Person:", currency(ratePerPerson));
+  if (present(ratePerPerson))             ctx = drawLabelValue(ctx, "Rate Per Person:", currency(ratePerPerson));
   if (isFora  && present(basePerPerson))  ctx = drawLabelValue(ctx, "Base Per Person:", currency(basePerPerson));
   if (isFora  && present(taxesAndFees))   ctx = drawLabelValue(ctx, "Taxes & Fees Per Person:", currency(taxesAndFees));
   if (present(issuingFee))                ctx = drawLabelValue(ctx, "Issuing Fee:", currency(issuingFee));
@@ -716,7 +716,7 @@ export async function buildFormstackDefaultDataStylePDF(
   const ccFee = str(data, "+ 3.5% CC FEE (NON-REFUNDABLE)");
   const totalAuthorized = str(data, "= TOTAL AUTHORIZED TO CHARGE PP*");
 
-  if (!isFora && present(ratePerPerson))
+  if (present(ratePerPerson))
     ctx = fsDrawTwoColumnRow(ctx, "RATE PER PERSON", currency(ratePerPerson));
   if (isFora && present(basePerPerson))
     ctx = fsDrawTwoColumnRow(ctx, "Base Per Person", currency(basePerPerson));

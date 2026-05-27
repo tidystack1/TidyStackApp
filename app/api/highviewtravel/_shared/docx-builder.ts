@@ -340,7 +340,7 @@ export async function buildFormstackDefaultDataStyleDocx(
   const ccFee = str(data, "+ 3.5% CC FEE (NON-REFUNDABLE)");
   const totalAuthorized = str(data, "= TOTAL AUTHORIZED TO CHARGE PP*");
 
-  if (!isFora && present(ratePerPerson))
+  if (present(ratePerPerson))
     fareRows.push({ label: "RATE PER PERSON", value: currency(ratePerPerson) });
   if (isFora && present(basePerPerson))
     fareRows.push({
