@@ -28,6 +28,11 @@ export function isNetRateForm(data: FormData): boolean {
   return formType === "Net Rate + CC Fee" || formType === "Net Rate (NO CC Fee)";
 }
 
+/** "How will you pay the fee?" applies to this Form Type. */
+export function isPublishedRateTicketingFeeForm(data: FormData): boolean {
+  return str(data, "Form Type") === "Published Rate + $75 Ticketing Fee";
+}
+
 function currency(value: string): string {
   const n = parseFloat(value);
   if (isNaN(n)) return value || "—";
@@ -303,6 +308,12 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
   // ─── Payment Information ──────────────────────────────────────────────────
   ctx = drawSectionHeader(ctx, "Payment Information");
   ctx = drawLabelValue(ctx, "Form of Payment:", str(data, "Form of payment"), { bold: true });
+  if (isPublishedRateTicketingFeeForm(data)) {
+    const feePayment = str(data, "How will you pay the fee?");
+    if (present(feePayment)) {
+      ctx = drawLabelValue(ctx, "How will you pay the fee?:", feePayment);
+    }
+  }
   ctx = gap(ctx, 10);
 
   // ─── Fare Breakdown ───────────────────────────────────────────────────────
@@ -679,6 +690,12 @@ export async function buildFormstackDefaultDataStylePDF(
 
   ctx = fsSection(ctx, "PAYMENT INFO");
   ctx = fsDrawTwoColumnRow(ctx, "Form of payment", str(data, "Form of payment"));
+  if (isPublishedRateTicketingFeeForm(data)) {
+    const feePayment = str(data, "How will you pay the fee?");
+    if (present(feePayment)) {
+      ctx = fsDrawTwoColumnRow(ctx, "How will you pay the fee?", feePayment);
+    }
+  }
   ctx = fsGap(ctx, 4);
   ctx = fsDrawTwoColumnRow(
     ctx,

@@ -7,6 +7,7 @@ import {
   isForaBooking,
   isNetRateForm,
   isNetRateWithCcFeeForm,
+  isPublishedRateTicketingFeeForm,
   parseSafeFileName,
   str,
   type FormData,
@@ -155,7 +156,15 @@ function buildEmailHtml(
     passengerSections.push(section(passengerLabel, details.join("")));
   }
 
-  const paymentRows = row("Form of Payment", str(data, "Form of payment"));
+  const paymentRows: string[] = [
+    row("Form of Payment", str(data, "Form of payment")),
+  ];
+  if (isPublishedRateTicketingFeeForm(data)) {
+    const feePayment = str(data, "How will you pay the fee?");
+    if (present(feePayment)) {
+      paymentRows.push(row("How will you pay the fee?", feePayment));
+    }
+  }
 
   const fareRows: string[] = [];
   const ratePerPerson = str(data, "RATE PER PERSON");
@@ -219,7 +228,7 @@ function buildEmailHtml(
       ${section("Agent Information", agentRows.join(""))}
       ${section("Booking Details", bookingRows.join(""))}
       ${passengerBlock}
-      ${section("Payment Information", paymentRows)}
+      ${section("Payment Information", paymentRows.join(""))}
       ${section("Fare Breakdown", fareRows.join(""))}
     </div>
   `;

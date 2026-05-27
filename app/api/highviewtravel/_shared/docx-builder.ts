@@ -15,6 +15,7 @@ import {
   isForaBooking,
   isNetRateForm,
   isNetRateWithCcFeeForm,
+  isPublishedRateTicketingFeeForm,
   str,
   type FormData,
 } from "./pdf-builder";
@@ -280,15 +281,23 @@ export async function buildFormstackDefaultDataStyleDocx(
   children.push(fieldTable(agentRows));
 
   children.push(sectionParagraph("PAYMENT INFO"));
-  children.push(
-    fieldTable([
-      { label: "Form of payment", value: str(data, "Form of payment") },
-      {
-        label: "Number of passengers",
-        value: str(data, "Number of passengers"),
-      },
-    ]),
-  );
+  const paymentRows: { label: string; value: string }[] = [
+    { label: "Form of payment", value: str(data, "Form of payment") },
+    {
+      label: "Number of passengers",
+      value: str(data, "Number of passengers"),
+    },
+  ];
+  if (isPublishedRateTicketingFeeForm(data)) {
+    const feePayment = str(data, "How will you pay the fee?");
+    if (present(feePayment)) {
+      paymentRows.push({
+        label: "How will you pay the fee?",
+        value: feePayment,
+      });
+    }
+  }
+  children.push(fieldTable(paymentRows));
 
   for (let i = 1; i <= FS_MAX_PASSENGERS; i++) {
     children.push(sectionParagraph(`PASSENGER ${i} INFO`));
