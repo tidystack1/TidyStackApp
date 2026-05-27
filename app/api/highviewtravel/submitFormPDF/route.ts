@@ -5,6 +5,7 @@ import {
   // buildFormstackDefaultDataStylePDF, // gray “client email” PDF — see commented block in POST
   buildPDF,
   isForaBooking,
+  isNetRateForm,
   isNetRateWithCcFeeForm,
   parseSafeFileName,
   str,
@@ -179,7 +180,7 @@ function buildEmailHtml(
     fareRows.push(row("+ Commission PP", currency(commissionPP)));
   if (present(totalPerPerson))
     fareRows.push(row("Total Per Person", currency(totalPerPerson)));
-  if (!isFora && present(total)) fareRows.push(row("Total", currency(total)));
+  if (isNetRateForm(data) && present(total)) fareRows.push(row("Total", currency(total)));
   if (present(ccFee))
     fareRows.push(row("+ 3.5% CC Fee (non-refundable)", currency(ccFee)));
   if (isNetRateWithCcFeeForm(data) && present(totalAuthorized)) {

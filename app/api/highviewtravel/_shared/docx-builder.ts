@@ -13,6 +13,7 @@ import {
 } from "docx";
 import {
   isForaBooking,
+  isNetRateForm,
   isNetRateWithCcFeeForm,
   str,
   type FormData,
@@ -371,15 +372,8 @@ export async function buildFormstackDefaultDataStyleDocx(
       label: "= TOTAL AUTHORIZED TO CHARGE PP*",
       value: currency(totalAuthorized),
     });
-  if (!isFora) {
-    const t = str(data, "Total");
-    fareRows.push({
-      label: "Total",
-      value: present(t) ? currency(t) : currency("0"),
-    });
-  } else if (present(total)) {
+  if (isNetRateForm(data) && present(total))
     fareRows.push({ label: "Total", value: currency(total) });
-  }
 
   children.push(sectionParagraph("FARE BREAKDOWN"));
   children.push(fieldTable(fareRows));

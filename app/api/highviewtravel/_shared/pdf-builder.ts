@@ -22,6 +22,12 @@ export function isNetRateWithCcFeeForm(data: FormData): boolean {
   return str(data, "Form Type") === "Net Rate + CC Fee";
 }
 
+/** Fare row "Total" applies to Net Rate form types. */
+export function isNetRateForm(data: FormData): boolean {
+  const formType = str(data, "Form Type");
+  return formType === "Net Rate + CC Fee" || formType === "Net Rate (NO CC Fee)";
+}
+
 function currency(value: string): string {
   const n = parseFloat(value);
   if (isNaN(n)) return value || "—";
@@ -323,7 +329,7 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
     ctx = drawLabelValue(ctx, "Total Per Person:", currency(totalPerPerson), { bold: true });
   }
 
-  if (!isFora && present(total))          ctx = drawLabelValue(ctx, "Total:", currency(total), { bold: true });
+  if (isNetRateForm(data) && present(total))          ctx = drawLabelValue(ctx, "Total:", currency(total), { bold: true });
   if (present(ccFee))                     ctx = drawLabelValue(ctx, "+ 3.5% CC Fee (non-refundable):", currency(ccFee));
 
   if (isNetRateWithCcFeeForm(data) && present(totalAuthorized)) {
@@ -736,12 +742,8 @@ export async function buildFormstackDefaultDataStylePDF(
       "= TOTAL AUTHORIZED TO CHARGE PP*",
       currency(totalAuthorized),
     );
-  if (!isFora) {
-    const t = str(data, "Total");
-    ctx = fsDrawTwoColumnRow(ctx, "Total", present(t) ? currency(t) : currency("0"));
-  } else if (present(total)) {
+  if (isNetRateForm(data) && present(total))
     ctx = fsDrawTwoColumnRow(ctx, "Total", currency(total));
-  }
 
   const pages = doc.getPages();
   const pageCount = pages.length;
