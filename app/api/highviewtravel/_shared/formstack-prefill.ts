@@ -6,6 +6,7 @@ const FIELD = {
   ratePP: "195201281",
   agentName: "193868029",
   email: "193868031",
+  ownersEmail: "195713296",
   formType: "194690055",
   issueFee: "194679743",
   commissionPP: "193868122",
@@ -60,6 +61,7 @@ export type GenerateEmailFormstackInput = {
   contactFirstName?: string;
   contactLastName?: string;
   contactEmail?: string;
+  ownersEmail?: string;
   formType?: string;
   issuingFee?: string;
   commissionRate?: string;
@@ -138,6 +140,7 @@ export function parseGenerateEmailFormstackInput(
     contactFirstName: pickString(body, "ContactFirstName", "contactFirstName"),
     contactLastName: pickString(body, "ContactLastName", "contactLastName"),
     contactEmail: pickString(body, "ContactEmail", "contactEmail"),
+    ownersEmail: pickString(body, "ownersEmail", "OwnersEmail"),
     formType: pickString(body, "formType", "FormType"),
     issuingFee: pickString(body, "issuingFee", "IssuingFee", "issueFee"),
     commissionRate: pickString(
@@ -183,6 +186,7 @@ export function buildFormstackPrefillFields(
     makeField(FIELD.amountOfDealsOnContact, String(amountOfDeals)),
     makeField(FIELD.agentName, agentName),
     makeField(FIELD.email, input.contactEmail),
+    makeField(FIELD.ownersEmail, input.ownersEmail),
     makeField(FIELD.formType, formTypeLabel),
     makeField(FIELD.issueFee, input.issuingFee),
     makeField(FIELD.commissionPP, input.commissionRate),
