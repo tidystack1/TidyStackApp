@@ -20,7 +20,6 @@ import {
   type FormData,
 } from "./pdf-builder";
 
-const FS_MAX_PASSENGERS = 9;
 const FS_LABEL_FILL = "EEEEEE";
 const FS_SECTION_FILL = "EEEEEE";
 const FS_META_FILL = "F2F2F2";
@@ -299,25 +298,21 @@ export async function buildFormstackDefaultDataStyleDocx(
   }
   children.push(fieldTable(paymentRows));
 
-  for (let i = 1; i <= FS_MAX_PASSENGERS; i++) {
+  for (let i = 1; i <= numPassengers; i++) {
     children.push(sectionParagraph(`PASSENGER ${i} INFO`));
     const passengerRows: { label: string; value: string }[] = [];
-    if (i <= numPassengers) {
-      const name = str(data, `Passenger ${i} Name`);
-      if (name)
-        passengerRows.push({ label: `Passenger Name ${i}`, value: name });
-      const seat = str(data, `Passenger ${i} Seat Preference`);
-      const ff = str(data, `Passenger ${i} Frequent Flyer #`);
-      const kt = str(data, `Passenger ${i} Known Traveler #`);
-      const airline = str(data, `Passenger ${i} Airline`);
-      const special = str(data, `Passenger ${i} Special Requests`);
-      if (seat) passengerRows.push({ label: "Seat Preference", value: seat });
-      if (ff) passengerRows.push({ label: "Frequent Flyer #", value: ff });
-      if (kt) passengerRows.push({ label: "Known Traveler #", value: kt });
-      if (airline) passengerRows.push({ label: "Airline", value: airline });
-      if (special)
-        passengerRows.push({ label: "Special Requests", value: special });
-    }
+    const name = str(data, `Passenger ${i} Name`);
+    if (name) passengerRows.push({ label: `Passenger Name ${i}`, value: name });
+    const seat = str(data, `Passenger ${i} Seat Preference`);
+    const ff = str(data, `Passenger ${i} Frequent Flyer #`);
+    const kt = str(data, `Passenger ${i} Known Traveler #`);
+    const airline = str(data, `Passenger ${i} Airline`);
+    const special = str(data, `Passenger ${i} Special Requests`);
+    if (seat) passengerRows.push({ label: "Seat Preference", value: seat });
+    if (ff) passengerRows.push({ label: "Frequent Flyer #", value: ff });
+    if (kt) passengerRows.push({ label: "Known Traveler #", value: kt });
+    if (airline) passengerRows.push({ label: "Airline", value: airline });
+    if (special) passengerRows.push({ label: "Special Requests", value: special });
     if (passengerRows.length > 0) {
       children.push(fieldTable(passengerRows));
     }
