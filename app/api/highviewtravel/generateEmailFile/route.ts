@@ -36,45 +36,6 @@ function getConfig() {
   return { token, property };
 }
 
-function mergeDealFilePropertyValue(
-  existing: string | undefined,
-  newFileId: string,
-): string {
-  const segments = (existing ?? "")
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const kept = segments.filter((s) => !/^https?:\/\//i.test(s));
-  const ids = [...new Set([...kept, newFileId])];
-  return ids.join(";");
-}
-
-async function fetchDealFileProperty(
-  dealId: string,
-  property: string,
-  token: string,
-): Promise<string | undefined> {
-  const url = new URL(
-    `https://api.hubapi.com/crm/v3/objects/deals/${encodeURIComponent(dealId)}`,
-  );
-  url.searchParams.set("properties", property);
-
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`HubSpot deal fetch failed (${res.status}): ${text}`);
-  }
-
-  const json = (await res.json()) as {
-    properties?: Record<string, string | null>;
-  };
-  const raw = json.properties?.[property];
-  return raw ?? undefined;
-}
-
 async function uploadEmlToHubSpot(
   emlBytes: Uint8Array,
   fileName: string,
@@ -322,16 +283,9 @@ export async function POST(request: NextRequest) {
       token,
     );
 
-    const previous = await fetchDealFileProperty(
-      hubspotDealId,
-      property,
-      token,
-    );
-    const propertyValue = mergeDealFilePropertyValue(previous, fileId);
-
     await patchDealProperties(
       hubspotDealId,
-      { [property]: propertyValue },
+      { [property]: fileId },
       token,
     );
 

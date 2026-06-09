@@ -255,50 +255,6 @@ function getConfig() {
 // ─── HubSpot helpers ──────────────────────────────────────────────────────────
 
 /**
- * HubSpot `fieldType: "file"` properties store **file IDs** (from File Manager), not URLs.
- * Passing a URL makes the UI show a link-like row instead of a real attachment.
- */
-function mergeDealFilePropertyValue(
-  existing: string | undefined,
-  newFileId: string,
-): string {
-  const segments = (existing ?? "")
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  // Drop mistaken URL strings from older integrations; keep real IDs from manual uploads.
-  const kept = segments.filter((s) => !/^https?:\/\//i.test(s));
-  const ids = [...new Set([...kept, newFileId])];
-  return ids.join(";");
-}
-
-async function fetchDealFileProperty(
-  dealId: string,
-  property: string,
-  token: string,
-): Promise<string | undefined> {
-  const url = new URL(
-    `https://api.hubapi.com/crm/v3/objects/deals/${encodeURIComponent(dealId)}`,
-  );
-  url.searchParams.set("properties", property);
-
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`HubSpot deal fetch failed (${res.status}): ${text}`);
-  }
-
-  const json = (await res.json()) as {
-    properties?: Record<string, string | null>;
-  };
-  const raw = json.properties?.[property];
-  return raw ?? undefined;
-}
-
-/**
  * Upload a file to HubSpot's File Manager.
  * Returns the File Manager id and public URL.
  */
@@ -450,26 +406,10 @@ export async function POST(request: NextRequest) {
     //   `[submitFormPDF] Formstack-style PDF uploaded: ${formstackFileUrl} (id=${formstackFileId})`,
     // );
 
-    const previous = await fetchDealFileProperty(dealId, property, token);
-    const previousWordDoc = await fetchDealFileProperty(
-      dealId,
-      HUBSPOT_DEAL_FORM_RESULT_WORD_DOC_PROPERTY,
-      token,
-    );
-    // const previousFormstack = await fetchDealFileProperty(
-    //   dealId,
-    //   HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY,
-    //   token,
-    // );
-    const propertyValue = mergeDealFilePropertyValue(previous, fileId);
-    const wordDocPropertyValue = mergeDealFilePropertyValue(
-      previousWordDoc,
-      wordFileId,
-    );
-    // const formstackPropertyValue = mergeDealFilePropertyValue(
-    //   previousFormstack,
-    //   formstackFileId,
-    // );
+    // Replace each file field with only the new upload (clears previous file IDs).
+    const propertyValue = fileId;
+    const wordDocPropertyValue = wordFileId;
+    // const formstackPropertyValue = formstackFileId;
     const emailHtml = buildEmailHtml(data, dealName, dealId);
 
     // 3. File properties + Ticketing / FORM RECEIVED/SEND IN SALE (single PATCH)
