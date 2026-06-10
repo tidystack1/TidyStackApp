@@ -122,6 +122,10 @@ function formatStartTime(isoString: string): string {
   return `${get("weekday")} ${day}${suffix} ${get("month")} ${get("year")} at ${get("hour")}:${get("minute")}${ampm}`;
 }
 
+function toNYDateString(d: Date): string {
+  return d.toLocaleDateString("en-US", { timeZone: "America/New_York" });
+}
+
 /**
  * POST handler
  */
@@ -167,7 +171,7 @@ export async function POST(req: NextRequest) {
     const webinarDetails = await getWebinarDetails(token, next.id);
 
     const tomorrow = new Date(now);
-    tomorrow.setDate(now.getDate() + 1);
+    tomorrow.setTime(now.getTime() + 24 * 60 * 60 * 1000);
 
     return NextResponse.json({
       active: true,
@@ -183,9 +187,9 @@ export async function POST(req: NextRequest) {
       registration_url: webinarDetails.registration_url || null,
       topic: next.topic || null,
       webinar_id: next.id,
-      is_today: startDateObj.toDateString() === now.toDateString() ? 1 : 0,
+      is_today: toNYDateString(startDateObj) === toNYDateString(now) ? 1 : 0,
       is_tomorrow:
-        startDateObj.toDateString() === tomorrow.toDateString() ? 1 : 0,
+        toNYDateString(startDateObj) === toNYDateString(tomorrow) ? 1 : 0,
     }, { headers: corsHeaders() });
   } catch (err) {
     console.error(err);
