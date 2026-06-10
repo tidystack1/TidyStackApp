@@ -91,34 +91,24 @@ async function getWebinarDetails(token: string, webinarId: string) {
 }
 
 /**
- * Format ISO date string as "Tuesday 1st July 2027 at 4:34pm"
+ * Format ISO date string as "Tuesday 1st July 2027 at 4:34pm" in America/New_York
  */
 function formatStartTime(isoString: string): string {
   const d = new Date(isoString);
-  const dayNames = [
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-  ];
-  const monthNames = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ];
-  const day = d.getDate();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(d);
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+
+  const day = parseInt(get("day"));
   const suffix =
     day === 1 || day === 21 || day === 31
       ? "st"
@@ -127,13 +117,9 @@ function formatStartTime(isoString: string): string {
         : day === 3 || day === 23
           ? "rd"
           : "th";
-  const hours = d.getHours();
-  const mins = d.getMinutes();
-  const ampm = hours >= 12 ? "pm" : "am";
-  const hour12 = hours % 12 || 12;
-  const minsPadded = mins < 10 ? `0${mins}` : `${mins}`;
-  const timeStr = `${hour12}:${minsPadded}${ampm}`;
-  return `${dayNames[d.getDay()]} ${day}${suffix} ${monthNames[d.getMonth()]} ${d.getFullYear()} at ${timeStr}`;
+
+  const ampm = get("dayPeriod").toLowerCase();
+  return `${get("weekday")} ${day}${suffix} ${get("month")} ${get("year")} at ${get("hour")}:${get("minute")}${ampm}`;
 }
 
 /**
