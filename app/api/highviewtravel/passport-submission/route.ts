@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getFormstackPrefillConfig } from "../_shared/formstack-prefill";
 
 /** HubSpot deal file property — passport uploads (append, do not replace). */
 const HUBSPOT_DEAL_PASSPORT_PROPERTY = "passport";
@@ -23,22 +24,34 @@ function getConfig() {
   return { token };
 }
 
-function parseInfoBody(body: Record<string, unknown>): Record<string, unknown> | null {
-  if (typeof body.info === "string") {
+function parseInfoPayload(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw === "string") {
     try {
-      return JSON.parse(body.info) as Record<string, unknown>;
+      return JSON.parse(raw) as Record<string, unknown>;
     } catch {
       return null;
     }
   }
-  if (
-    body.info !== null &&
-    body.info !== undefined &&
-    typeof body.info === "object" &&
-    !Array.isArray(body.info)
-  ) {
-    return body.info as Record<string, unknown>;
+  if (raw !== null && raw !== undefined && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
   }
+  return null;
+}
+
+/** Zapier sends `{ info: "..." }` or `{ data: { info: "..." } }`. */
+function parseInfoBody(body: Record<string, unknown>): Record<string, unknown> | null {
+  const direct = parseInfoPayload(body.info);
+  if (direct) return direct;
+
+  if (
+    body.data !== null &&
+    body.data !== undefined &&
+    typeof body.data === "object" &&
+    !Array.isArray(body.data)
+  ) {
+    return parseInfoPayload((body.data as Record<string, unknown>).info);
+  }
+
   return null;
 }
 
@@ -51,12 +64,22 @@ function fieldText(field: unknown): string {
   return "";
 }
 
-/** Prefer Formstack admin download URL over the Zapier S3 `value`. */
-function fieldFileUrl(field: unknown): string {
+function fieldId(field: unknown): string {
   if (!field || typeof field !== "object") return "";
-  const f = field as FormstackFieldValue;
-  if (f.url?.trim()) return f.url.trim();
-  if (f.value?.trim()) return f.value.trim();
+  const id = (field as FormstackFieldValue).field_id;
+  return id != null ? String(id).trim() : "";
+}
+
+function isZapierHydrateToken(value: string): boolean {
+  return value.startsWith("hydrate|||") && value.endsWith("|||hydrate");
+}
+
+/** Direct-download URL when Zapier sends a public link (e.g. S3), not a hydrate token. */
+function directFileUrl(field: unknown): string {
+  if (!field || typeof field !== "object") return "";
+  const value = (field as FormstackFieldValue).value?.trim() ?? "";
+  if (!value || isZapierHydrateToken(value)) return "";
+  if (value.startsWith("http://") || value.startsWith("https://")) return value;
   return "";
 }
 
@@ -86,26 +109,108 @@ function guessMimeType(fileName: string, contentType: string | null): string {
   return "application/octet-stream";
 }
 
-async function downloadFile(
+function fileNameFromResponse(
+  disposition: string | null,
+  fallback: string,
+): string {
+  const nameMatch = /filename\*?=(?:UTF-8''|")?([^";\n]+)/i.exec(disposition ?? "");
+  if (nameMatch?.[1]) {
+    return decodeURIComponent(nameMatch[1].replace(/"/g, ""));
+  }
+  return fallback;
+}
+
+async function downloadFromUrl(
   url: string,
+  fallbackFileName: string,
 ): Promise<{ bytes: Uint8Array; fileName: string; mimeType: string }> {
   const res = await fetch(url, { redirect: "follow" });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Failed to download passport file (${res.status}): ${text.slice(0, 300)}`);
+    throw new Error(
+      `Failed to download passport file (${res.status}): ${text.slice(0, 300)}`,
+    );
   }
 
   const contentType = res.headers.get("content-type");
-  const disposition = res.headers.get("content-disposition") ?? "";
-  const nameMatch = /filename\*?=(?:UTF-8''|")?([^";\n]+)/i.exec(disposition);
-  const fileName = nameMatch?.[1]
-    ? decodeURIComponent(nameMatch[1].replace(/"/g, ""))
-    : fileNameFromUrl(url);
+  const fileName = fileNameFromResponse(
+    res.headers.get("content-disposition"),
+    fileNameFromUrl(url) || fallbackFileName,
+  );
   const mimeType = guessMimeType(fileName, contentType);
   const bytes = new Uint8Array(await res.arrayBuffer());
 
   return { bytes, fileName, mimeType };
+}
+
+/**
+ * Formstack admin URLs require login; use the v2025 API with our PAT instead.
+ * @see https://developers.formstack.com/reference/getsubmissionupload-1
+ */
+async function downloadFromFormstackSubmission(
+  submissionId: string,
+  uploadFieldId: string,
+  formstackToken: string,
+): Promise<{ bytes: Uint8Array; fileName: string; mimeType: string }> {
+  const params = new URLSearchParams({ fieldId: uploadFieldId });
+  const url = `https://www.formstack.com/api/v2025/submissions/${encodeURIComponent(submissionId)}/upload?${params}`;
+
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${formstackToken}`,
+      Accept: "application/octet-stream",
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `Formstack file download failed (${res.status}): ${text.slice(0, 300)}`,
+    );
+  }
+
+  const fallbackFileName = `passport_${submissionId}`;
+  const fileName = fileNameFromResponse(
+    res.headers.get("content-disposition"),
+    fallbackFileName,
+  );
+  const mimeType = guessMimeType(fileName, res.headers.get("content-type"));
+  const bytes = new Uint8Array(await res.arrayBuffer());
+
+  return { bytes, fileName, mimeType };
+}
+
+async function resolvePassportFile(
+  info: Record<string, unknown>,
+): Promise<{ bytes: Uint8Array; fileName: string; mimeType: string; source: string }> {
+  const fileField = info["File"];
+  const submissionId = fieldText(info["UniqueID"]);
+  const uploadFieldId = fieldId(fileField);
+  const publicUrl = directFileUrl(fileField);
+
+  if (submissionId && uploadFieldId) {
+    const { token: formstackToken } = getFormstackPrefillConfig();
+    console.log(
+      `[passport-submission] Downloading via Formstack API (submission=${submissionId}, field=${uploadFieldId})`,
+    );
+    const file = await downloadFromFormstackSubmission(
+      submissionId,
+      uploadFieldId,
+      formstackToken,
+    );
+    return { ...file, source: "formstack-api" };
+  }
+
+  if (publicUrl) {
+    console.log(`[passport-submission] Downloading from public URL ${publicUrl}`);
+    const file = await downloadFromUrl(publicUrl, `passport_${Date.now()}`);
+    return { ...file, source: "direct-url" };
+  }
+
+  throw new Error(
+    "Could not resolve passport file: need UniqueID + File.field_id for Formstack API, or a public file URL in File.value",
+  );
 }
 
 async function uploadFileToHubSpot(
@@ -226,18 +331,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const sourceUrl = fieldFileUrl(info["File"]);
-    if (!sourceUrl) {
-      return NextResponse.json(
-        { error: "File URL is missing from the form data" },
-        { status: 400 },
-      );
-    }
-
-    console.log(
-      `[passport-submission] Downloading passport for deal ${dealId} from ${sourceUrl}`,
-    );
-    const { bytes, fileName, mimeType } = await downloadFile(sourceUrl);
+    console.log(`[passport-submission] Resolving passport file for deal ${dealId}`);
+    const { bytes, fileName, mimeType, source } = await resolvePassportFile(info);
 
     console.log(
       `[passport-submission] Uploading ${fileName} to HubSpot Files`,
@@ -270,7 +365,7 @@ export async function POST(request: NextRequest) {
       dealId,
       fileId,
       fileUrl,
-      sourceUrl,
+      source,
       property: HUBSPOT_DEAL_PASSPORT_PROPERTY,
       passportValue,
       appended: Boolean(existingPassport),
