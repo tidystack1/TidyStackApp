@@ -83,6 +83,54 @@ function directFileUrl(field: unknown): string {
   return "";
 }
 
+function extensionFromFileName(fileName: string): string | null {
+  const match = /\.([a-z0-9]+)$/i.exec(fileName.trim());
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
+function extensionFromBytes(bytes: Uint8Array): string | null {
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x25 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x44 &&
+    bytes[3] === 0x46
+  ) {
+    return "pdf";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "jpg";
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    return "png";
+  }
+  return null;
+}
+
+/** HubSpot upload name: `{dealId}_{original Formstack filename}`. */
+function buildPassportFileName(dealId: string, sourceFileName: string): string {
+  const name = sourceFileName.trim() || "passport";
+  return `${dealId}_${name}`;
+}
+
+function mimeTypeFromExtension(ext: string): string {
+  const map: Record<string, string> = {
+    pdf: "application/pdf",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+  };
+  return map[ext] ?? "application/octet-stream";
+}
+
 function fileNameFromUrl(url: string): string {
   try {
     const base = new URL(url).pathname.split("/").pop();
@@ -332,10 +380,22 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[passport-submission] Resolving passport file for deal ${dealId}`);
-    const { bytes, fileName, mimeType, source } = await resolvePassportFile(info);
+    const { bytes, fileName: sourceFileName, mimeType: sourceMimeType, source } =
+      await resolvePassportFile(info);
+
+    const fileName = buildPassportFileName(dealId, sourceFileName);
+    const ext =
+      extensionFromFileName(sourceFileName) ??
+      extensionFromBytes(bytes) ??
+      "bin";
+    const mimeType =
+      sourceMimeType === "application/octet-stream" ||
+      sourceMimeType === "application/x-www-form-urlencoded"
+        ? mimeTypeFromExtension(ext)
+        : sourceMimeType;
 
     console.log(
-      `[passport-submission] Uploading ${fileName} to HubSpot Files`,
+      `[passport-submission] Uploading ${fileName} to HubSpot Files (source: ${sourceFileName})`,
     );
     const { id: fileId, url: fileUrl } = await uploadFileToHubSpot(
       bytes,
@@ -365,6 +425,8 @@ export async function POST(request: NextRequest) {
       dealId,
       fileId,
       fileUrl,
+      fileName,
+      sourceFileName,
       source,
       property: HUBSPOT_DEAL_PASSPORT_PROPERTY,
       passportValue,
