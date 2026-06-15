@@ -230,6 +230,15 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
     color: COLOR_HEADER_TITLE,
   });
 
+  const dealName = str(data, "HubSpot Deal Name") || "booking";
+  ctx.page.drawText(`Hubspot Deal: ${dealName}`, {
+    x: titleX,
+    y: PAGE_H - 54,
+    size: 11,
+    font: boldFont,
+    color: COLOR_HEADER_TITLE,
+  });
+
   const now = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const dateLabel = `Generated: ${now}`;
   const dateW = font.widthOfTextAtSize(dateLabel, 8);

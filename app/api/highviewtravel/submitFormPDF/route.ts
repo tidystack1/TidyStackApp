@@ -88,7 +88,6 @@ function section(title: string, rows: string): string {
 function buildEmailHtml(
   data: FormData,
   dealName: string,
-  dealId: string,
 ): string {
   const isFora = isForaBooking(data);
   const numPassengers = inferPassengerCount(data);
@@ -211,20 +210,23 @@ function buildEmailHtml(
   const submissionUrl = submissionId
     ? `https://www.formstack.com/admin/submission/view/${encodeURIComponent(submissionId)}/58429290`
     : "";
-  const submissionLinkBlock = submissionId
+  const submissionLinkHtml = submissionId
     ? `
-      <div style="margin:0 0 18px;padding:16px 18px;border:2px solid #126181;border-radius:8px;background:#eef8fc;font-family:Arial,Helvetica,sans-serif;">
-        <div style="font-size:18px;font-weight:700;color:#126181;margin-bottom:8px;">Here's a link to the submission ${escapeHtml(submissionId)}</div>
+        <div style="font-size:18px;font-weight:700;color:#126181;margin:14px 0 8px;">Here's a link to the submission ${escapeHtml(submissionId)}</div>
         <a href="${submissionUrl}" style="font-size:16px;font-weight:700;color:#0b5cad;text-decoration:underline;word-break:break-all;">${submissionUrl}</a>
-      </div>
-    `
+      `
     : "";
+  const topHighlightBlock = `
+      <div style="margin:0 0 18px;padding:16px 18px;border:2px solid #126181;border-radius:8px;background:#eef8fc;font-family:Arial,Helvetica,sans-serif;">
+        <div style="font-size:24px;font-weight:700;color:#126181;line-height:1.3;">Hubspot Deal: ${escapeHtml(dealName)}</div>
+        ${submissionLinkHtml}
+      </div>
+    `;
 
   return `
     <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;color:#1a1a1a;max-width:780px;margin:0 auto;">
-      ${submissionLinkBlock}
-      <h2 style="margin:0 0 6px;font-size:22px;">Travel Booking Summary</h2>
-      <p style="margin:0 0 14px;color:#555;">Deal: ${escapeHtml(dealName)} (${escapeHtml(dealId)})</p>
+      ${topHighlightBlock}
+      <h2 style="margin:0 0 14px;font-size:22px;">Travel Booking Summary</h2>
       ${section("Agent Information", agentRows.join(""))}
       ${section("Booking Details", bookingRows.join(""))}
       ${passengerBlock}
@@ -410,7 +412,7 @@ export async function POST(request: NextRequest) {
     const propertyValue = fileId;
     const wordDocPropertyValue = wordFileId;
     // const formstackPropertyValue = formstackFileId;
-    const emailHtml = buildEmailHtml(data, dealName, dealId);
+    const emailHtml = buildEmailHtml(data, dealName);
 
     // 3. File properties + Ticketing / FORM RECEIVED/SEND IN SALE (single PATCH)
     const dealProps: Record<string, string> = {
