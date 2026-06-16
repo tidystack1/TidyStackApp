@@ -5,10 +5,16 @@ import { PDFDocument, rgb } from "pdf-lib";
 // SmartSuite Configuration
 const SMARTSUITE_API_KEY = process.env.TOMCHEI_SHABBOS_SMARTSUITE_API_KEY;
 const SMARTSUITE_ACCOUNT_ID = process.env.TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID;
-const SMARTSUITE_RECORDS_TABLE_ID = "6925af29a4002f833ea5a0e8";
+const SMARTSUITE_RECORDS_TABLE_ID = "6925a5e5faf422df3f931169";
 const SMARTSUITE_DELIVERY_TABLE_ID = "6925b0fb90de6fdfbd33e096";
 const SMARTSUITE_DELIVERY_LIST_FIELD_ID = "sb1a7b32b6";
 const SMARTSUITE_LABELS_FIELD_ID = "s3b0b4fbc0";
+
+const PACKAGE_FILTER_FIELD_ID = "sec653610f";
+const ROUTE_NUMBER_FIELD_ID = "sba911ff35";
+const BOX_SIZE_FIELD_ID = "s2baca63ff";
+const ADDRESS_FIELD_ID = "sad19ed83a";
+const DELIVERY_INSTRUCTIONS_FIELD_ID = "se9d193bde";
 
 interface DeliveryListRequest {
   id: string;
@@ -18,12 +24,6 @@ interface DeliveryListRequest {
 interface SmartSuiteRecord {
   id: string;
   title: string;
-  s019f88929?: unknown[][];
-  s01b42a1e2?: unknown[][];
-  s3eaec935f?: unknown[][];
-  sb4d52576b?: string;
-  s611b4bf9c?: string;
-  s64a81a706?: unknown[][];
   [key: string]: unknown;
 }
 
@@ -106,8 +106,7 @@ export async function POST(request: NextRequest) {
 async function fetchSmartSuiteRecords(
   packageId: string,
 ): Promise<SmartSuiteResponse> {
-  const url =
-    "https://app.smartsuite.com/api/v1/applications/6925af29a4002f833ea5a0e8/records/list/";
+  const url = `https://app.smartsuite.com/api/v1/applications/${SMARTSUITE_RECORDS_TABLE_ID}/records/list/`;
 
   const response = await fetch(url, {
     method: "POST",
@@ -121,14 +120,9 @@ async function fetchSmartSuiteRecords(
         operator: "and",
         fields: [
           {
-            field: "sd5bd00296",
-            comparison: "contains",
-            value: packageId,
-          },
-          {
-            field: "sf44659fe6",
-            comparison: "is",
-            value: "0Nnwo",
+            field: PACKAGE_FILTER_FIELD_ID,
+            comparison: "has_any_of",
+            value: [packageId],
           },
         ],
       },
@@ -146,11 +140,49 @@ async function fetchSmartSuiteRecords(
   return response.json() as Promise<SmartSuiteResponse>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function coerceDisplayText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((v) => coerceDisplayText(v))
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return parts.join(", ");
+  }
+  if (isRecord(value)) {
+    const candidates = [
+      value["display_value"],
+      value["label"],
+      value["name"],
+      value["title"],
+      value["sys_root"],
+      value["value"],
+    ];
+    for (const c of candidates) {
+      const s = coerceDisplayText(c);
+      if (s) return s;
+    }
+    return "";
+  }
+  const text = String(value).trim();
+  if (/^\[object\s+.+\]$/i.test(text)) return "";
+  return text;
+}
+
 function groupRecordsByRoute(records: SmartSuiteRecord[]): GroupedRecords {
   const grouped: GroupedRecords = {};
 
   records.forEach((record) => {
-    const route = record.s611b4bf9c || "Unassigned Route";
+    const route =
+      coerceDisplayText(record[ROUTE_NUMBER_FIELD_ID]) || "Unassigned Route";
     if (!grouped[route]) {
       grouped[route] = [];
     }
@@ -177,7 +209,7 @@ async function generateDeliveryListPDF(
     let yPosition = height - margin;
 
     // Title
-    page.drawText(`Route ${route}`, {
+    page.drawText(sanitizePdfText(`Route ${route}`), {
       x: margin,
       y: yPosition,
       size: 24,
@@ -244,10 +276,12 @@ async function generateDeliveryListPDF(
 
     // Draw records
     for (const record of records) {
-      const item = extractItemValue(record.s019f88929);
-      const location = extractLocationValue(record.s01b42a1e2);
-      const instructions = extractInstructionsValue(record.s3eaec935f);
-      const customerId = extractCustomerIdsValue(record.s64a81a706);
+      const item = coerceDisplayText(record[BOX_SIZE_FIELD_ID]);
+      const location = coerceDisplayText(record[ADDRESS_FIELD_ID]);
+      const instructions = coerceDisplayText(
+        record[DELIVERY_INSTRUCTIONS_FIELD_ID],
+      );
+      const customerId = record.id;
 
       const itemLines = wrapText(item, columnWidths[0] - 10, 9);
       const locationLines = wrapText(location, columnWidths[1] - 10, 9);
@@ -320,7 +354,9 @@ async function generateDeliveryListPDF(
     }
 
     // Add total boxes text at the bottom
-    const totalText = `Total boxes for Route ${route}:     ${records.length} boxes`;
+    const totalText = sanitizePdfText(
+      `Total boxes for Route ${route}:     ${records.length} boxes`,
+    );
     page.drawText(totalText, {
       x: margin,
       y: Math.max(yPosition - 30, margin),
@@ -334,126 +370,31 @@ async function generateDeliveryListPDF(
   return Buffer.from(pdfBytes);
 }
 
-function extractItemValue(itemArray?: unknown[][]): string {
-  if (!itemArray || !Array.isArray(itemArray) || itemArray.length === 0) {
-    return "";
-  }
-
-  const labels: string[] = [];
-
-  for (const item of itemArray) {
-    if (Array.isArray(item)) {
-      for (const element of item) {
-        if (element && typeof element === "object" && "label" in element) {
-          const label = (element as { label?: unknown }).label;
-          if (typeof label === "string") {
-            labels.push(label);
-          } else if (label !== undefined) {
-            labels.push(String(label));
-          }
-        }
-      }
+function sanitizePdfText(text: string): string {
+  // pdf-lib default fonts use WinAnsi (Latin-1); drop unsupported chars (emoji, Hebrew, etc.)
+  let result = "";
+  for (const char of text) {
+    const code = char.codePointAt(0)!;
+    if (
+      (code >= 0x20 && code <= 0x7e) ||
+      (code >= 0xa0 && code <= 0xff)
+    ) {
+      result += char;
     }
   }
-
-  return labels.join(", ");
-}
-
-function extractLocationValue(locationArray?: unknown[][]): string {
-  if (
-    !locationArray ||
-    !Array.isArray(locationArray) ||
-    locationArray.length === 0
-  ) {
-    return "";
-  }
-  const firstLocation = locationArray[0];
-  if (
-    Array.isArray(firstLocation) &&
-    firstLocation.length > 0 &&
-    firstLocation[0]
-  ) {
-    const loc = firstLocation[0];
-    if (loc && typeof loc === "object" && "sys_root" in loc) {
-      const sysRoot = (loc as { sys_root?: unknown }).sys_root;
-      if (typeof sysRoot === "string") {
-        return sysRoot;
-      }
-      if (sysRoot !== undefined) {
-        return String(sysRoot);
-      }
-    }
-  }
-  return "";
-}
-
-function extractInstructionsValue(instructionsArray?: unknown[][]): string {
-  if (
-    !instructionsArray ||
-    !Array.isArray(instructionsArray) ||
-    instructionsArray.length === 0
-  ) {
-    return "";
-  }
-  const firstInstructions = instructionsArray[0];
-  if (Array.isArray(firstInstructions) && firstInstructions.length > 0) {
-    const instruction = firstInstructions[0];
-    if (instruction === null || instruction === undefined) {
-      return "";
-    }
-    if (typeof instruction === "string") {
-      return instruction;
-    }
-    return String(instruction);
-  }
-  return "";
-}
-
-function extractCustomerIdsValue(customerIdsArray?: unknown[][]): string {
-  if (
-    !customerIdsArray ||
-    !Array.isArray(customerIdsArray) ||
-    customerIdsArray.length === 0
-  ) {
-    return "";
-  }
-
-  const values: string[] = [];
-
-  for (const item of customerIdsArray) {
-    if (Array.isArray(item)) {
-      for (const element of item) {
-        if (element !== null && element !== undefined) {
-          if (typeof element === "string") {
-            values.push(element);
-          } else if (typeof element === "number") {
-            values.push(String(element));
-          } else if (typeof element === "object" && "label" in element) {
-            const label = (element as { label?: unknown }).label;
-            if (typeof label === "string") {
-              values.push(label);
-            } else if (label !== undefined) {
-              values.push(String(label));
-            }
-          } else {
-            values.push(String(element));
-          }
-        }
-      }
-    }
-  }
-
-  return values.join(", ");
+  return result;
 }
 
 function wrapText(text: string, maxWidth: number, fontSize: number): string[] {
   if (!text) return [];
 
+  const sanitized = sanitizePdfText(text);
+
   const estimatedCharsPerLine = Math.floor(maxWidth / (fontSize * 0.6));
   const lines: string[] = [];
 
   let currentLine = "";
-  const words = text.split(" ");
+  const words = sanitized.split(" ");
 
   words.forEach((word) => {
     if ((currentLine + " " + word).length > estimatedCharsPerLine) {
@@ -527,8 +468,8 @@ async function generateLabelsListPDF(
 
   // Sort records by item text to group same values together
   const sortedRecords = [...records].sort((a, b) => {
-    const itemA = extractItemValue(a.s019f88929);
-    const itemB = extractItemValue(b.s019f88929);
+    const itemA = coerceDisplayText(a[BOX_SIZE_FIELD_ID]);
+    const itemB = coerceDisplayText(b[BOX_SIZE_FIELD_ID]);
     return itemA.localeCompare(itemB);
   });
 
@@ -566,7 +507,7 @@ async function generateLabelsListPDF(
     });
 
     // Extract and draw item text - centered both horizontally and vertically
-    const itemText = extractItemValue(record.s019f88929);
+    const itemText = coerceDisplayText(record[BOX_SIZE_FIELD_ID]);
     const fontSize = 18;
     const lines = wrapText(itemText, labelWidth - 10, fontSize);
 
