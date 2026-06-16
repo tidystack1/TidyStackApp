@@ -13,6 +13,7 @@ const SMARTSUITE_LABELS_FIELD_ID = "s3b0b4fbc0";
 const PACKAGE_FILTER_FIELD_ID = "sec653610f";
 const ROUTE_NUMBER_FIELD_ID = "sba911ff35";
 const BOX_SIZE_FIELD_ID = "s2baca63ff";
+const CUSTOMER_ID_FIELD_ID = "sc9e87f825";
 const ADDRESS_FIELD_ID = "sad19ed83a";
 const DELIVERY_INSTRUCTIONS_FIELD_ID = "se9d193bde";
 const BOXES_TO_YI_WOODMERE_FIELD_ID = "s1a7e187fc";
@@ -293,7 +294,7 @@ async function generateDeliveryListPDF(
       const instructions = coerceDisplayText(
         record[DELIVERY_INSTRUCTIONS_FIELD_ID],
       );
-      const customerId = record.id;
+      const customerId = coerceDisplayText(record[CUSTOMER_ID_FIELD_ID]);
 
       const itemLines = wrapText(item, columnWidths[0] - 10, 9);
       const locationLines = wrapText(location, columnWidths[1] - 10, 9);
@@ -478,27 +479,50 @@ async function generateLabelsListPDF(
   const pageWidth = 595; // A4 width in points
   const pageHeight = 842; // A4 height in points
 
+  // Exclude records with no box size text (empty labels)
+  const labelRecords = records.filter((record) =>
+    Boolean(coerceDisplayText(record[BOX_SIZE_FIELD_ID])),
+  );
+
   // Sort records by item text to group same values together
-  const sortedRecords = [...records].sort((a, b) => {
+  const sortedRecords = [...labelRecords].sort((a, b) => {
     const itemA = coerceDisplayText(a[BOX_SIZE_FIELD_ID]);
     const itemB = coerceDisplayText(b[BOX_SIZE_FIELD_ID]);
     return itemA.localeCompare(itemB);
   });
 
+  const totalBoxes = sortedRecords.length;
+
+  // Summary page with total box count
+  const summaryPage = pdfDoc.addPage([pageWidth, pageHeight]);
+  summaryPage.drawText(sanitizePdfText("Tomchei Shabbos - Box Labels"), {
+    x: marginLeft,
+    y: pageHeight - marginTop - 40,
+    size: 24,
+    color: rgb(0, 0, 0),
+  });
+  summaryPage.drawText(
+    sanitizePdfText(`Total boxes: ${totalBoxes}`),
+    {
+      x: marginLeft,
+      y: pageHeight - marginTop - 90,
+      size: 36,
+      color: rgb(0, 0, 0),
+    },
+  );
+
   let labelIndex = 0;
-  let page = pdfDoc.addPage([pageWidth, pageHeight]);
+  let page: ReturnType<PDFDocument["addPage"]> | null = null;
 
   for (const record of sortedRecords) {
-    // Calculate position on page
     const rowIndex = Math.floor(labelIndex / labelsPerRow);
-    const colIndex = labelIndex % labelsPerRow;
 
-    // If we've filled the page, create a new one
-    if (rowIndex >= labelsPerColumn) {
+    if (page === null || rowIndex >= labelsPerColumn) {
       page = pdfDoc.addPage([pageWidth, pageHeight]);
       labelIndex = 0;
     }
 
+    const activePage = page;
     const recalculatedRowIndex = Math.floor(labelIndex / labelsPerRow);
     const recalculatedColIndex = labelIndex % labelsPerRow;
 
@@ -509,7 +533,7 @@ async function generateLabelsListPDF(
       (recalculatedRowIndex + 1) * (labelHeight + gapY);
 
     // Draw label border
-    page.drawRectangle({
+    activePage.drawRectangle({
       x: xPosition,
       y: yPosition,
       width: labelWidth,
@@ -536,7 +560,7 @@ async function generateLabelsListPDF(
       const estimatedLineWidth = line.length * (fontSize * 0.5);
       const centeredX = xPosition + (labelWidth - estimatedLineWidth) / 2;
 
-      page.drawText(line, {
+      activePage.drawText(line, {
         x: centeredX,
         y: textY,
         size: fontSize,
