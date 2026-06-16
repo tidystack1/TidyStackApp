@@ -15,6 +15,8 @@ const ROUTE_NUMBER_FIELD_ID = "sba911ff35";
 const BOX_SIZE_FIELD_ID = "s2baca63ff";
 const ADDRESS_FIELD_ID = "sad19ed83a";
 const DELIVERY_INSTRUCTIONS_FIELD_ID = "se9d193bde";
+const BOXES_TO_YI_WOODMERE_FIELD_ID = "s1a7e187fc";
+const PICKUP_FIELD_ID = "s7dcf28d05";
 
 interface DeliveryListRequest {
   id: string;
@@ -123,6 +125,16 @@ async function fetchSmartSuiteRecords(
             field: PACKAGE_FILTER_FIELD_ID,
             comparison: "has_any_of",
             value: [packageId],
+          },
+          {
+            field: BOXES_TO_YI_WOODMERE_FIELD_ID,
+            comparison: "is",
+            value: false,
+          },
+          {
+            field: PICKUP_FIELD_ID,
+            comparison: "is",
+            value: false,
           },
         ],
       },
