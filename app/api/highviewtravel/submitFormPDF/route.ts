@@ -20,8 +20,6 @@ const HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID = "25756531";
 /** Deal file property internal name — gray Formstack-style PDF for client email (disabled in POST) */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- re-enable with commented gray-PDF block
 const HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY = "form_result__client_email";
-/** Deal file property — Formstack-style Word doc (Default Data layout) */
-const HUBSPOT_DEAL_FORM_RESULT_WORD_DOC_PROPERTY = "form_result_word_doc";
 /** Deal single-line text — set to "Completed" when form PDF is generated */
 const HUBSPOT_DEAL_LINK_STATUS_PROPERTY = "link_status";
 
@@ -408,16 +406,14 @@ export async function POST(request: NextRequest) {
     //   `[submitFormPDF] Formstack-style PDF uploaded: ${formstackFileUrl} (id=${formstackFileId})`,
     // );
 
-    // Replace each file field with only the new upload (clears previous file IDs).
-    const propertyValue = fileId;
-    const wordDocPropertyValue = wordFileId;
+    // Store both file IDs in the single configured HubSpot file property.
+    const propertyValue = `${fileId};${wordFileId}`;
     // const formstackPropertyValue = formstackFileId;
     const emailHtml = buildEmailHtml(data, dealName);
 
     // 3. File properties + Ticketing / FORM RECEIVED/SEND IN SALE (single PATCH)
     const dealProps: Record<string, string> = {
       [property]: propertyValue,
-      [HUBSPOT_DEAL_FORM_RESULT_WORD_DOC_PROPERTY]: wordDocPropertyValue,
       // [HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY]: formstackPropertyValue,
       [HUBSPOT_DEAL_LINK_STATUS_PROPERTY]: "Completed",
       pipeline: HUBSPOT_TICKETING_PIPELINE_ID,
