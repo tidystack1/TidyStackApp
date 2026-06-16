@@ -760,6 +760,8 @@ export async function buildFormstackDefaultDataStylePDF(
     ctx = fsDrawTwoColumnRow(ctx, "+ COMMISSION PP", currency(commissionPP));
   if (present(totalPerPerson))
     ctx = fsDrawTwoColumnRow(ctx, "Total Per Person", currency(totalPerPerson));
+  if (isNetRateForm(data) && present(total))
+    ctx = fsDrawTwoColumnRow(ctx, "Total", currency(total));
   if (present(ccFee))
     ctx = fsDrawTwoColumnRow(ctx, "+ 3.5% CC FEE (NON-REFUNDABLE)", currency(ccFee));
   if (isNetRateWithCcFeeForm(data) && present(totalAuthorized))
@@ -768,8 +770,6 @@ export async function buildFormstackDefaultDataStylePDF(
       "= TOTAL AUTHORIZED TO CHARGE PP*",
       currency(totalAuthorized),
     );
-  if (isNetRateForm(data) && present(total))
-    ctx = fsDrawTwoColumnRow(ctx, "Total", currency(total));
 
   const pages = doc.getPages();
   const pageCount = pages.length;

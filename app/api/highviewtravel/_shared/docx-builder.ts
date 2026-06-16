@@ -366,6 +366,8 @@ export async function buildFormstackDefaultDataStyleDocx(
       label: "Total Per Person",
       value: currency(totalPerPerson),
     });
+  if (isNetRateForm(data) && present(total))
+    fareRows.push({ label: "Total", value: currency(total) });
   if (present(ccFee))
     fareRows.push({
       label: "+ 3.5% CC FEE (NON-REFUNDABLE)",
@@ -376,8 +378,6 @@ export async function buildFormstackDefaultDataStyleDocx(
       label: "= TOTAL AUTHORIZED TO CHARGE PP*",
       value: currency(totalAuthorized),
     });
-  if (isNetRateForm(data) && present(total))
-    fareRows.push({ label: "Total", value: currency(total) });
 
   children.push(sectionParagraph("FARE BREAKDOWN"));
   children.push(fieldTable(fareRows));
