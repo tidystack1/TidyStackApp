@@ -211,6 +211,44 @@ async function generateDeliveryListPDF(
   const pdfDoc = await PDFDocument.create();
 
   const routes = Object.keys(groupedRecords).sort();
+  const totalRecords = routes.reduce(
+    (sum, route) => sum + groupedRecords[route].length,
+    0,
+  );
+
+  // Summary page
+  const summaryPage = pdfDoc.addPage([612, 792]);
+  const { height: summaryHeight, width: summaryWidth } = summaryPage.getSize();
+  summaryPage.drawText(
+    sanitizePdfText("Tomchei Shabbos - Delivery List"),
+    {
+      x: 40,
+      y: summaryHeight - 80,
+      size: 24,
+      color: rgb(0, 0, 0),
+      maxWidth: summaryWidth - 80,
+    },
+  );
+  summaryPage.drawText(
+    sanitizePdfText(`Total deliveries: ${totalRecords}`),
+    {
+      x: 40,
+      y: summaryHeight - 140,
+      size: 36,
+      color: rgb(0, 0, 0),
+      maxWidth: summaryWidth - 80,
+    },
+  );
+  summaryPage.drawText(
+    sanitizePdfText(`Routes: ${routes.join(", ")}`),
+    {
+      x: 40,
+      y: summaryHeight - 200,
+      size: 14,
+      color: rgb(0.3, 0.3, 0.3),
+      maxWidth: summaryWidth - 80,
+    },
+  );
 
   for (const route of routes) {
     const records = groupedRecords[route];
