@@ -70,8 +70,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Filter out records with no box size so both PDFs have the same records
+    const filteredRecords = records.items.filter((record) =>
+      Boolean(coerceDisplayText(record[BOX_SIZE_FIELD_ID])),
+    );
+
     // Group records by route
-    const groupedByRoute = groupRecordsByRoute(records.items);
+    const groupedByRoute = groupRecordsByRoute(filteredRecords);
 
     // Generate PDF
     const pdfBuffer = await generateDeliveryListPDF(groupedByRoute);
@@ -83,13 +88,13 @@ export async function POST(request: NextRequest) {
     await uploadDeliveryListPDFToSmartSuite(pdfBuffer, id);
 
     // Generate and upload labels PDF
-    const labelsPdfBuffer = await generateLabelsListPDF(records.items);
+    const labelsPdfBuffer = await generateLabelsListPDF(filteredRecords);
     await uploadLabelsPDFToSmartSuite(labelsPdfBuffer, id);
 
     return NextResponse.json(
       {
         message: "Delivery list PDF generated and sent successfully",
-        recordCount: records.items.length,
+        recordCount: filteredRecords.length,
         routeCount: Object.keys(groupedByRoute).length,
       },
       { status: 200 },
