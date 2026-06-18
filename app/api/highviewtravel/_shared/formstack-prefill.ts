@@ -5,6 +5,7 @@ const FIELD = {
   penalties: "193868119",
   ratePP: "195201281",
   agentName: "193868029",
+  agencyName: "193868030",
   email: "193868031",
   ownersEmail: "195713296",
   formType: "194690055",
@@ -171,6 +172,7 @@ export function buildFormstackPrefillFields(
   const numberOfPassengers = passengers.length;
   const amountOfDeals = countDealsOnContact(input.dealsOnContact);
   const agentName = `${input.contactFirstName ?? ""} ${input.contactLastName ?? ""}`.trim();
+  const isFora = input.isFora === "true";
   const formTypeLabel =
     FORM_TYPE_MAP[input.formType ?? ""] ?? input.formType ?? "";
 
@@ -185,6 +187,7 @@ export function buildFormstackPrefillFields(
     makeField(FIELD.ratePP, input.ratePP),
     makeField(FIELD.amountOfDealsOnContact, String(amountOfDeals)),
     makeField(FIELD.agentName, agentName),
+    makeField(FIELD.agencyName, isFora ? "Fora" : ""),
     makeField(FIELD.email, input.contactEmail),
     makeField(FIELD.ownersEmail, input.ownersEmail),
     makeField(FIELD.formType, formTypeLabel),
@@ -193,7 +196,7 @@ export function buildFormstackPrefillFields(
     makeField(FIELD.baseFarePP, input.baseFarePP),
     makeField(FIELD.taxesAndFeesPP, input.taxesAndFeesPP),
     makeField(FIELD.dealName, input.dealName),
-    makeField(FIELD.isFora, input.isFora === "true" ? "Yes" : ""),
+    makeField(FIELD.isFora, isFora ? "Yes" : ""),
     makeField(FIELD.numberOfPassengers, String(numberOfPassengers)),
     ...passengerFields,
   ];
