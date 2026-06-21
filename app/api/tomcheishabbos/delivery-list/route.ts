@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import nodemailer from "nodemailer";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, rgb, type PDFPage } from "pdf-lib";
 
 // SmartSuite Configuration
 const SMARTSUITE_API_KEY = process.env.TOMCHEI_SHABBOS_SMARTSUITE_API_KEY;
@@ -8,7 +7,6 @@ const SMARTSUITE_ACCOUNT_ID = process.env.TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID;
 const SMARTSUITE_RECORDS_TABLE_ID = "6925a5e5faf422df3f931169";
 const SMARTSUITE_DELIVERY_TABLE_ID = "6925b0fb90de6fdfbd33e096";
 const SMARTSUITE_DELIVERY_LIST_FIELD_ID = "sb1a7b32b6";
-const SMARTSUITE_LABELS_FIELD_ID = "s3b0b4fbc0";
 
 const PACKAGE_FILTER_FIELD_ID = "sec653610f";
 const ROUTE_NUMBER_FIELD_ID = "sba911ff35";
@@ -70,32 +68,72 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Filter out records with no box size so both PDFs have the same records
-    const filteredRecords = records.items.filter((record) =>
-      Boolean(coerceDisplayText(record[BOX_SIZE_FIELD_ID])),
+    const withBoxSize = records.items.filter(hasBoxSize);
+    const routeRecords = withBoxSize.filter(
+      (record) =>
+        !isTrue(record, BOXES_TO_YI_WOODMERE_FIELD_ID) &&
+        !isTrue(record, PICKUP_FIELD_ID),
+    );
+    const woodmereMain = withBoxSize.filter(
+      (record) =>
+        isTrue(record, BOXES_TO_YI_WOODMERE_FIELD_ID) && isEmptyRoute(record),
+    );
+    const woodmerePickup = withBoxSize.filter(
+      (record) =>
+        isTrue(record, BOXES_TO_YI_WOODMERE_FIELD_ID) &&
+        isEmptyRoute(record) &&
+        isTrue(record, PICKUP_FIELD_ID),
+    );
+    const pickupsOnly = withBoxSize.filter(
+      (record) =>
+        isTrue(record, PICKUP_FIELD_ID) &&
+        isTrue(record, BOXES_TO_YI_WOODMERE_FIELD_ID) &&
+        isEmptyRoute(record),
     );
 
-    // Group records by route
-    const groupedByRoute = groupRecordsByRoute(filteredRecords);
+    const groupedByRoute = groupRecordsByRoute(routeRecords);
+    const dateStamp = new Date().toISOString().split("T")[0];
 
-    // Generate PDF
     const pdfBuffer = await generateDeliveryListPDF(groupedByRoute);
+    await clearAndUploadPdfToSmartSuite(
+      pdfBuffer,
+      id,
+      `delivery_list_${dateStamp}.pdf`,
+    );
 
-    // Send email
-    // await sendDeliveryListEmail(pdfBuffer);
+    const labelsPdfBuffer = await generateLabelsListPDF(routeRecords);
+    await uploadPdfToSmartSuite(
+      labelsPdfBuffer,
+      id,
+      `labels_${dateStamp}.pdf`,
+    );
 
-    // Upload PDF to SmartSuite record
-    await uploadDeliveryListPDFToSmartSuite(pdfBuffer, id);
+    const woodmerePdfBuffer = await generateWoodmerePDF(
+      woodmereMain,
+      woodmerePickup,
+    );
+    await uploadPdfToSmartSuite(
+      woodmerePdfBuffer,
+      id,
+      `woodmere_${dateStamp}.pdf`,
+    );
 
-    // Generate and upload labels PDF
-    const labelsPdfBuffer = await generateLabelsListPDF(filteredRecords);
-    await uploadLabelsPDFToSmartSuite(labelsPdfBuffer, id);
+    const pickupsPdfBuffer = await generatePickupsOnlyPDF(pickupsOnly);
+    await uploadPdfToSmartSuite(
+      pickupsPdfBuffer,
+      id,
+      `pickups_only_${dateStamp}.pdf`,
+    );
 
     return NextResponse.json(
       {
-        message: "Delivery list PDF generated and sent successfully",
-        recordCount: filteredRecords.length,
+        message:
+          "Routes, labels, Woodmere, and Pickups Only PDFs generated and uploaded successfully",
+        recordCount: routeRecords.length,
         routeCount: Object.keys(groupedByRoute).length,
+        woodmereMainCount: woodmereMain.length,
+        woodmerePickupCount: woodmerePickup.length,
+        pickupsOnlyCount: pickupsOnly.length,
       },
       { status: 200 },
     );
@@ -131,16 +169,6 @@ async function fetchSmartSuiteRecords(
             field: PACKAGE_FILTER_FIELD_ID,
             comparison: "has_any_of",
             value: [packageId],
-          },
-          {
-            field: BOXES_TO_YI_WOODMERE_FIELD_ID,
-            comparison: "is",
-            value: false,
-          },
-          {
-            field: PICKUP_FIELD_ID,
-            comparison: "is",
-            value: false,
           },
         ],
       },
@@ -195,6 +223,18 @@ function coerceDisplayText(value: unknown): string {
   return text;
 }
 
+function isTrue(record: SmartSuiteRecord, fieldId: string): boolean {
+  return record[fieldId] === true;
+}
+
+function isEmptyRoute(record: SmartSuiteRecord): boolean {
+  return !coerceDisplayText(record[ROUTE_NUMBER_FIELD_ID]);
+}
+
+function hasBoxSize(record: SmartSuiteRecord): boolean {
+  return Boolean(coerceDisplayText(record[BOX_SIZE_FIELD_ID]));
+}
+
 function groupRecordsByRoute(records: SmartSuiteRecord[]): GroupedRecords {
   const grouped: GroupedRecords = {};
 
@@ -210,6 +250,173 @@ function groupRecordsByRoute(records: SmartSuiteRecord[]): GroupedRecords {
   return grouped;
 }
 
+const DELIVERY_TABLE_HEADERS = [
+  "Box Size",
+  "Address",
+  "Delivery Instructions",
+  "Customer ID",
+];
+
+function getDeliveryColumnWidths(contentWidth: number): number[] {
+  return [
+    contentWidth * 0.24,
+    contentWidth * 0.31,
+    contentWidth * 0.31,
+    contentWidth * 0.14,
+  ];
+}
+
+function drawDeliverySection(
+  pdfDoc: PDFDocument,
+  sectionTitle: string,
+  records: SmartSuiteRecord[],
+  footerText?: string,
+): void {
+  const pageSize: [number, number] = [612, 792];
+  const margin = 40;
+  let page = pdfDoc.addPage(pageSize);
+  const { height, width } = page.getSize();
+  const contentWidth = width - 2 * margin;
+  const columnWidths = getDeliveryColumnWidths(contentWidth);
+  const rowHeight = 20;
+  const headerHeight = 25;
+  let yPosition = height - margin;
+
+  const drawTableHeader = (targetPage: PDFPage, headerY: number) => {
+    targetPage.drawRectangle({
+      x: margin,
+      y: headerY - headerHeight,
+      width: contentWidth,
+      height: headerHeight,
+      borderColor: rgb(0.8, 0.8, 0.8),
+      borderWidth: 1,
+      color: rgb(0.95, 0.95, 0.95),
+    });
+
+    let headerColumnX = margin;
+    DELIVERY_TABLE_HEADERS.forEach((header, columnIndex) => {
+      targetPage.drawText(header, {
+        x: headerColumnX + 5,
+        y: headerY - 17,
+        size: 10,
+        color: rgb(0, 0, 0),
+        maxWidth: columnWidths[columnIndex] - 10,
+      });
+
+      if (columnIndex < DELIVERY_TABLE_HEADERS.length - 1) {
+        targetPage.drawLine({
+          start: {
+            x: headerColumnX + columnWidths[columnIndex],
+            y: headerY,
+          },
+          end: {
+            x: headerColumnX + columnWidths[columnIndex],
+            y: headerY - headerHeight,
+          },
+          color: rgb(0.8, 0.8, 0.8),
+        });
+      }
+
+      headerColumnX += columnWidths[columnIndex];
+    });
+  };
+
+  page.drawText(sanitizePdfText(sectionTitle), {
+    x: margin,
+    y: yPosition,
+    size: 24,
+    color: rgb(0, 0, 0),
+    maxWidth: contentWidth,
+  });
+
+  yPosition -= 40;
+  drawTableHeader(page, yPosition);
+  yPosition -= headerHeight;
+
+  for (const record of records) {
+    const item = coerceDisplayText(record[BOX_SIZE_FIELD_ID]);
+    const location = coerceDisplayText(record[ADDRESS_FIELD_ID]);
+    const instructions = coerceDisplayText(record[DELIVERY_INSTRUCTIONS_FIELD_ID]);
+    const customerId = coerceDisplayText(record[CUSTOMER_ID_FIELD_ID]);
+
+    const itemLines = wrapText(item, columnWidths[0] - 10, 9);
+    const locationLines = wrapText(location, columnWidths[1] - 10, 9);
+    const instructionLines = wrapText(instructions, columnWidths[2] - 10, 9);
+    const customerIdLines = wrapText(customerId, columnWidths[3] - 10, 9);
+
+    const maxLines = Math.max(
+      itemLines.length,
+      locationLines.length,
+      instructionLines.length,
+      customerIdLines.length,
+    );
+    const currentRowHeight = Math.max(rowHeight, maxLines * 12 + 4);
+
+    if (yPosition - currentRowHeight < margin) {
+      page = pdfDoc.addPage(pageSize);
+      yPosition = page.getHeight() - margin;
+      drawTableHeader(page, yPosition);
+      yPosition -= headerHeight;
+    }
+
+    page.drawRectangle({
+      x: margin,
+      y: yPosition - currentRowHeight,
+      width: contentWidth,
+      height: currentRowHeight,
+      borderColor: rgb(0.8, 0.8, 0.8),
+      borderWidth: 1,
+    });
+
+    let columnX = margin;
+    const columnTexts = [
+      itemLines,
+      locationLines,
+      instructionLines,
+      customerIdLines,
+    ];
+
+    columnTexts.forEach((lines, columnIndex) => {
+      let textY = yPosition - 15;
+      lines.forEach((line) => {
+        page.drawText(line, {
+          x: columnX + 5,
+          y: textY,
+          size: 9,
+          color: rgb(0, 0, 0),
+          maxWidth: columnWidths[columnIndex] - 10,
+        });
+        textY -= 12;
+      });
+
+      if (columnIndex < columnTexts.length - 1) {
+        page.drawLine({
+          start: { x: columnX + columnWidths[columnIndex], y: yPosition },
+          end: {
+            x: columnX + columnWidths[columnIndex],
+            y: yPosition - currentRowHeight,
+          },
+          color: rgb(0.8, 0.8, 0.8),
+        });
+      }
+
+      columnX += columnWidths[columnIndex];
+    });
+
+    yPosition -= currentRowHeight;
+  }
+
+  if (footerText) {
+    page.drawText(sanitizePdfText(footerText), {
+      x: margin,
+      y: Math.max(yPosition - 30, margin),
+      size: 16,
+      color: rgb(0, 0, 0),
+      maxWidth: contentWidth,
+    });
+  }
+}
+
 async function generateDeliveryListPDF(
   groupedRecords: GroupedRecords,
 ): Promise<Buffer> {
@@ -221,206 +428,125 @@ async function generateDeliveryListPDF(
     0,
   );
 
-  // Summary page
   const summaryPage = pdfDoc.addPage([612, 792]);
   const { height: summaryHeight, width: summaryWidth } = summaryPage.getSize();
-  summaryPage.drawText(
-    sanitizePdfText("Tomchei Shabbos - Delivery List"),
-    {
-      x: 40,
-      y: summaryHeight - 80,
-      size: 24,
-      color: rgb(0, 0, 0),
-      maxWidth: summaryWidth - 80,
-    },
-  );
-  summaryPage.drawText(
-    sanitizePdfText(`Total deliveries: ${totalRecords}`),
-    {
-      x: 40,
-      y: summaryHeight - 140,
-      size: 36,
-      color: rgb(0, 0, 0),
-      maxWidth: summaryWidth - 80,
-    },
-  );
-  summaryPage.drawText(
-    sanitizePdfText(`Routes: ${routes.join(", ")}`),
-    {
-      x: 40,
-      y: summaryHeight - 200,
-      size: 14,
-      color: rgb(0.3, 0.3, 0.3),
-      maxWidth: summaryWidth - 80,
-    },
-  );
+  summaryPage.drawText(sanitizePdfText("Tomchei Shabbos - Delivery List"), {
+    x: 40,
+    y: summaryHeight - 80,
+    size: 24,
+    color: rgb(0, 0, 0),
+    maxWidth: summaryWidth - 80,
+  });
+  summaryPage.drawText(sanitizePdfText(`Total deliveries: ${totalRecords}`), {
+    x: 40,
+    y: summaryHeight - 140,
+    size: 36,
+    color: rgb(0, 0, 0),
+    maxWidth: summaryWidth - 80,
+  });
+  summaryPage.drawText(sanitizePdfText(`Routes: ${routes.join(", ")}`), {
+    x: 40,
+    y: summaryHeight - 200,
+    size: 14,
+    color: rgb(0.3, 0.3, 0.3),
+    maxWidth: summaryWidth - 80,
+  });
 
   for (const route of routes) {
     const records = groupedRecords[route];
-    const page = pdfDoc.addPage([612, 792]); // Standard letter size
-    const { height, width } = page.getSize();
-
-    const margin = 40;
-    const contentWidth = width - 2 * margin;
-    let yPosition = height - margin;
-
-    // Title
-    page.drawText(sanitizePdfText(`Route ${route}`), {
-      x: margin,
-      y: yPosition,
-      size: 24,
-      color: rgb(0, 0, 0),
-      maxWidth: contentWidth,
-    });
-
-    yPosition -= 40;
-
-    // Table headers
-    const columnWidths = [
-      contentWidth * 0.24,
-      contentWidth * 0.31,
-      contentWidth * 0.31,
-      contentWidth * 0.14,
-    ];
-    const rowHeight = 20;
-    const headerHeight = 25;
-
-    // Draw header row
-    page.drawRectangle({
-      x: margin,
-      y: yPosition - headerHeight,
-      width: contentWidth,
-      height: headerHeight,
-      borderColor: rgb(0.8, 0.8, 0.8),
-      borderWidth: 1,
-      color: rgb(0.95, 0.95, 0.95),
-    });
-
-    const headers = [
-      "Box Size",
-      "Address",
-      "Delivery Instructions",
-      "Customer ID",
-    ];
-    let headerColumnX = margin;
-
-    headers.forEach((header, columnIndex) => {
-      page.drawText(header, {
-        x: headerColumnX + 5,
-        y: yPosition - 17,
-        size: 10,
-        color: rgb(0, 0, 0),
-        maxWidth: columnWidths[columnIndex] - 10,
-      });
-
-      // Draw vertical dividers (except after last column)
-      if (columnIndex < headers.length - 1) {
-        page.drawLine({
-          start: { x: headerColumnX + columnWidths[columnIndex], y: yPosition },
-          end: {
-            x: headerColumnX + columnWidths[columnIndex],
-            y: yPosition - headerHeight,
-          },
-          color: rgb(0.8, 0.8, 0.8),
-        });
-      }
-
-      headerColumnX += columnWidths[columnIndex];
-    });
-
-    yPosition -= headerHeight;
-
-    // Draw records
-    for (const record of records) {
-      const item = coerceDisplayText(record[BOX_SIZE_FIELD_ID]);
-      const location = coerceDisplayText(record[ADDRESS_FIELD_ID]);
-      const instructions = coerceDisplayText(
-        record[DELIVERY_INSTRUCTIONS_FIELD_ID],
-      );
-      const customerId = coerceDisplayText(record[CUSTOMER_ID_FIELD_ID]);
-
-      const itemLines = wrapText(item, columnWidths[0] - 10, 9);
-      const locationLines = wrapText(location, columnWidths[1] - 10, 9);
-      const instructionLines = wrapText(instructions, columnWidths[2] - 10, 9);
-      const customerIdLines = wrapText(customerId, columnWidths[3] - 10, 9);
-
-      const maxLines = Math.max(
-        itemLines.length,
-        locationLines.length,
-        instructionLines.length,
-        customerIdLines.length,
-      );
-      const currentRowHeight = Math.max(rowHeight, maxLines * 12 + 4);
-
-      // Check if we need a new page
-      if (yPosition - currentRowHeight < margin) {
-        const newPage = pdfDoc.addPage([612, 792]);
-        const { height: newHeight } = newPage.getSize();
-        yPosition = newHeight - margin;
-      }
-
-      // Draw row border/background
-      page.drawRectangle({
-        x: margin,
-        y: yPosition - currentRowHeight,
-        width: contentWidth,
-        height: currentRowHeight,
-        borderColor: rgb(0.8, 0.8, 0.8),
-        borderWidth: 1,
-      });
-
-      // Draw column dividers and text
-      let columnX = margin;
-      const columnTexts = [
-        itemLines,
-        locationLines,
-        instructionLines,
-        customerIdLines,
-      ];
-
-      columnTexts.forEach((lines, columnIndex) => {
-        let textY = yPosition - 15;
-        lines.forEach((line) => {
-          page.drawText(line, {
-            x: columnX + 5,
-            y: textY,
-            size: 9,
-            color: rgb(0, 0, 0),
-            maxWidth: columnWidths[columnIndex] - 10,
-          });
-          textY -= 12;
-        });
-
-        // Draw vertical dividers (except after last column)
-        if (columnIndex < columnTexts.length - 1) {
-          page.drawLine({
-            start: { x: columnX + columnWidths[columnIndex], y: yPosition },
-            end: {
-              x: columnX + columnWidths[columnIndex],
-              y: yPosition - currentRowHeight,
-            },
-            color: rgb(0.8, 0.8, 0.8),
-          });
-        }
-
-        columnX += columnWidths[columnIndex];
-      });
-
-      yPosition -= currentRowHeight;
-    }
-
-    // Add total boxes text at the bottom
-    const totalText = sanitizePdfText(
+    drawDeliverySection(
+      pdfDoc,
+      `Route ${route}`,
+      records,
       `Total boxes for Route ${route}:     ${records.length} boxes`,
     );
-    page.drawText(totalText, {
-      x: margin,
-      y: Math.max(yPosition - 30, margin),
-      size: 16,
-      color: rgb(0, 0, 0),
-      maxWidth: contentWidth,
-    });
   }
+
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
+}
+
+async function generateWoodmerePDF(
+  mainRecords: SmartSuiteRecord[],
+  pickupRecords: SmartSuiteRecord[],
+): Promise<Buffer> {
+  const pdfDoc = await PDFDocument.create();
+
+  const summaryPage = pdfDoc.addPage([612, 792]);
+  const { height: summaryHeight, width: summaryWidth } = summaryPage.getSize();
+  summaryPage.drawText(sanitizePdfText("Tomchei Shabbos - Woodmere"), {
+    x: 40,
+    y: summaryHeight - 80,
+    size: 24,
+    color: rgb(0, 0, 0),
+    maxWidth: summaryWidth - 80,
+  });
+  summaryPage.drawText(
+    sanitizePdfText(`Total records (main): ${mainRecords.length}`),
+    {
+      x: 40,
+      y: summaryHeight - 140,
+      size: 24,
+      color: rgb(0, 0, 0),
+      maxWidth: summaryWidth - 80,
+    },
+  );
+  summaryPage.drawText(
+    sanitizePdfText(`Woodmere Pickup: ${pickupRecords.length}`),
+    {
+      x: 40,
+      y: summaryHeight - 180,
+      size: 24,
+      color: rgb(0, 0, 0),
+      maxWidth: summaryWidth - 80,
+    },
+  );
+
+  drawDeliverySection(
+    pdfDoc,
+    "main",
+    mainRecords,
+    `Total boxes for main:     ${mainRecords.length} boxes`,
+  );
+  drawDeliverySection(
+    pdfDoc,
+    "Woodmere Pickup",
+    pickupRecords,
+    `Total boxes for Woodmere Pickup:     ${pickupRecords.length} boxes`,
+  );
+
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
+}
+
+async function generatePickupsOnlyPDF(
+  records: SmartSuiteRecord[],
+): Promise<Buffer> {
+  const pdfDoc = await PDFDocument.create();
+
+  const summaryPage = pdfDoc.addPage([612, 792]);
+  const { height: summaryHeight, width: summaryWidth } = summaryPage.getSize();
+  summaryPage.drawText(sanitizePdfText("Tomchei Shabbos - Pickups Only"), {
+    x: 40,
+    y: summaryHeight - 80,
+    size: 24,
+    color: rgb(0, 0, 0),
+    maxWidth: summaryWidth - 80,
+  });
+  summaryPage.drawText(sanitizePdfText(`Total pickups: ${records.length}`), {
+    x: 40,
+    y: summaryHeight - 140,
+    size: 36,
+    color: rgb(0, 0, 0),
+    maxWidth: summaryWidth - 80,
+  });
+
+  drawDeliverySection(
+    pdfDoc,
+    "Pickups Only",
+    records,
+    `Total boxes for Pickups Only:     ${records.length} boxes`,
+  );
 
   const pdfBytes = await pdfDoc.save();
   return Buffer.from(pdfBytes);
@@ -431,10 +557,7 @@ function sanitizePdfText(text: string): string {
   let result = "";
   for (const char of text) {
     const code = char.codePointAt(0)!;
-    if (
-      (code >= 0x20 && code <= 0x7e) ||
-      (code >= 0xa0 && code <= 0xff)
-    ) {
+    if ((code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff)) {
       result += char;
     }
   }
@@ -465,43 +588,43 @@ function wrapText(text: string, maxWidth: number, fontSize: number): string[] {
   return lines;
 }
 
-async function sendDeliveryListEmail(pdfBuffer: Buffer): Promise<void> {
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    secure: process.env.SMTP_SECURE === "true",
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
+// async function sendDeliveryListEmail(pdfBuffer: Buffer): Promise<void> {
+//   const transporter = nodemailer.createTransport({
+//     host: process.env.SMTP_HOST,
+//     port: parseInt(process.env.SMTP_PORT || "587"),
+//     secure: process.env.SMTP_SECURE === "true",
+//     auth: {
+//       user: process.env.SMTP_USER,
+//       pass: process.env.SMTP_PASS,
+//     },
+//   });
 
-  const mailOptions = {
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to: "mspitzer@tidystack.com",
-    subject: "Tomchei Shabbos - Delivery List",
-    text: "Please find the delivery list PDF attached.",
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563eb;">📦 Tomchei Shabbos - Delivery List</h2>
-        <p>Please find the delivery list PDF attached.</p>
-        <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
-        <p style="color: #6b7280; font-size: 12px;">
-          This is an automated message from the Delivery List system.
-        </p>
-      </div>
-    `,
-    attachments: [
-      {
-        filename: `delivery_list_${new Date().toISOString().split("T")[0]}.pdf`,
-        content: pdfBuffer,
-        contentType: "application/pdf",
-      },
-    ],
-  };
+//   const mailOptions = {
+//     from: process.env.SMTP_FROM || process.env.SMTP_USER,
+//     to: "mspitzer@tidystack.com",
+//     subject: "Tomchei Shabbos - Delivery List",
+//     text: "Please find the delivery list PDF attached.",
+//     html: `
+//       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+//         <h2 style="color: #2563eb;">📦 Tomchei Shabbos - Delivery List</h2>
+//         <p>Please find the delivery list PDF attached.</p>
+//         <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
+//         <p style="color: #6b7280; font-size: 12px;">
+//           This is an automated message from the Delivery List system.
+//         </p>
+//       </div>
+//     `,
+//     attachments: [
+//       {
+//         filename: `delivery_list_${new Date().toISOString().split("T")[0]}.pdf`,
+//         content: pdfBuffer,
+//         contentType: "application/pdf",
+//       },
+//     ],
+//   };
 
-  await transporter.sendMail(mailOptions);
-}
+//   await transporter.sendMail(mailOptions);
+// }
 
 async function generateLabelsListPDF(
   records: SmartSuiteRecord[],
@@ -544,15 +667,12 @@ async function generateLabelsListPDF(
     size: 24,
     color: rgb(0, 0, 0),
   });
-  summaryPage.drawText(
-    sanitizePdfText(`Total boxes: ${totalBoxes}`),
-    {
-      x: marginLeft,
-      y: pageHeight - marginTop - 90,
-      size: 36,
-      color: rgb(0, 0, 0),
-    },
-  );
+  summaryPage.drawText(sanitizePdfText(`Total boxes: ${totalBoxes}`), {
+    x: marginLeft,
+    y: pageHeight - marginTop - 90,
+    size: 36,
+    color: rgb(0, 0, 0),
+  });
 
   let labelIndex = 0;
   let page: ReturnType<PDFDocument["addPage"]> | null = null;
@@ -620,9 +740,10 @@ async function generateLabelsListPDF(
   return Buffer.from(pdfBytes);
 }
 
-async function uploadLabelsPDFToSmartSuite(
+async function uploadPdfToSmartSuite(
   pdfBuffer: Buffer,
   recordId: string,
+  filename: string,
 ): Promise<void> {
   if (!SMARTSUITE_API_KEY || !SMARTSUITE_ACCOUNT_ID) {
     console.error("[DELIVERY LIST] Missing SmartSuite credentials");
@@ -630,13 +751,11 @@ async function uploadLabelsPDFToSmartSuite(
   }
 
   try {
-    // Upload the labels PDF to the same field as delivery list (don't clear to keep both files)
     const formData = new FormData();
     const pdfBytes = new Uint8Array(pdfBuffer);
     const fileBlob = new Blob([pdfBytes], {
       type: "application/pdf",
     });
-    const filename = `labels_${new Date().toISOString().split("T")[0]}.pdf`;
 
     formData.append("files", fileBlob, filename);
     formData.append("filename", filename);
@@ -656,25 +775,24 @@ async function uploadLabelsPDFToSmartSuite(
     if (!uploadResponse.ok) {
       const errorText = await uploadResponse.text();
       console.error(
-        `[DELIVERY LIST] Labels upload failed: ${uploadResponse.status} ${errorText}`,
+        `[DELIVERY LIST] SmartSuite upload failed (${filename}): ${uploadResponse.status} ${errorText}`,
       );
       return;
     }
 
-    console.log(
-      "[DELIVERY LIST] Labels PDF uploaded to SmartSuite successfully",
-    );
+    console.log(`[DELIVERY LIST] ${filename} uploaded to SmartSuite successfully`);
   } catch (error) {
     console.error(
-      "[DELIVERY LIST] Error uploading labels PDF to SmartSuite:",
+      `[DELIVERY LIST] Error uploading ${filename} to SmartSuite:`,
       error,
     );
   }
 }
 
-async function uploadDeliveryListPDFToSmartSuite(
+async function clearAndUploadPdfToSmartSuite(
   pdfBuffer: Buffer,
   recordId: string,
+  filename: string,
 ): Promise<void> {
   if (!SMARTSUITE_API_KEY || !SMARTSUITE_ACCOUNT_ID) {
     console.error("[DELIVERY LIST] Missing SmartSuite credentials");
@@ -682,7 +800,6 @@ async function uploadDeliveryListPDFToSmartSuite(
   }
 
   try {
-    // Clear the existing file field by setting it to null
     const clearResponse = await fetch(
       `https://app.smartsuite.com/api/v1/applications/${SMARTSUITE_DELIVERY_TABLE_ID}/records/${recordId}/`,
       {
@@ -704,38 +821,7 @@ async function uploadDeliveryListPDFToSmartSuite(
       );
     }
 
-    // Now upload the new file
-    const formData = new FormData();
-    const pdfBytes = new Uint8Array(pdfBuffer);
-    const fileBlob = new Blob([pdfBytes], {
-      type: "application/pdf",
-    });
-    const filename = `delivery_list_${new Date().toISOString().split("T")[0]}.pdf`;
-
-    formData.append("files", fileBlob, filename);
-    formData.append("filename", filename);
-
-    const uploadResponse = await fetch(
-      `https://app.smartsuite.com/api/v1/recordfiles/${SMARTSUITE_DELIVERY_TABLE_ID}/${recordId}/${SMARTSUITE_DELIVERY_LIST_FIELD_ID}/`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Token ${SMARTSUITE_API_KEY}`,
-          "ACCOUNT-ID": SMARTSUITE_ACCOUNT_ID,
-        },
-        body: formData,
-      },
-    );
-
-    if (!uploadResponse.ok) {
-      const errorText = await uploadResponse.text();
-      console.error(
-        `[DELIVERY LIST] SmartSuite upload failed: ${uploadResponse.status} ${errorText}`,
-      );
-      return;
-    }
-
-    console.log("[DELIVERY LIST] PDF uploaded to SmartSuite successfully");
+    await uploadPdfToSmartSuite(pdfBuffer, recordId, filename);
   } catch (error) {
     console.error("[DELIVERY LIST] Error uploading PDF to SmartSuite:", error);
   }
