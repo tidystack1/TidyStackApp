@@ -16,6 +16,7 @@ const FIELD = {
   taxesAndFeesPP: "194679850",
   dealName: "194963563",
   isFora: "195103040",
+  hasPassport: "196333890",
   numberOfPassengers: "193868044",
   passenger1: "195116052",
   passenger2: "195116090",
@@ -71,6 +72,7 @@ export type GenerateEmailFormstackInput = {
   taxesAndFeesPP?: string;
   dealName?: string;
   isFora?: string;
+  gotPassportPictures?: string;
 };
 
 function makeField(id: string, value: string | undefined | null): FormstackPrefillField {
@@ -161,6 +163,11 @@ export function parseGenerateEmailFormstackInput(
     ),
     dealName: pickString(body, "DealName", "dealName"),
     isFora: pickString(body, "IsFora", "isFora"),
+    gotPassportPictures: pickString(
+      body,
+      "GotPassportPictures",
+      "gotPassportPictures",
+    ),
   };
 }
 
@@ -173,6 +180,7 @@ export function buildFormstackPrefillFields(
   const amountOfDeals = countDealsOnContact(input.dealsOnContact);
   const agentName = `${input.contactFirstName ?? ""} ${input.contactLastName ?? ""}`.trim();
   const isFora = input.isFora === "true";
+  const hasPassport = input.gotPassportPictures?.toLowerCase() === "yes";
   const formTypeLabel =
     FORM_TYPE_MAP[input.formType ?? ""] ?? input.formType ?? "";
 
@@ -197,6 +205,7 @@ export function buildFormstackPrefillFields(
     makeField(FIELD.taxesAndFeesPP, input.taxesAndFeesPP),
     makeField(FIELD.dealName, input.dealName),
     makeField(FIELD.isFora, isFora ? "Yes" : ""),
+    makeField(FIELD.hasPassport, hasPassport ? "Yes" : ""),
     makeField(FIELD.numberOfPassengers, String(numberOfPassengers)),
     ...passengerFields,
   ];
