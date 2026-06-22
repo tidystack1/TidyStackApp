@@ -74,12 +74,14 @@ export async function POST(request: NextRequest) {
         !isTrue(record, BOXES_TO_YI_WOODMERE_FIELD_ID) &&
         !isTrue(record, PICKUP_FIELD_ID),
     );
-    const woodmereMain = withBoxSize.filter((record) =>
-      isTrue(record, BOXES_TO_YI_WOODMERE_FIELD_ID),
+    const woodmereMain = withBoxSize.filter(
+      (record) =>
+        isTrue(record, BOXES_TO_YI_WOODMERE_FIELD_ID) && isEmptyRoute(record),
     );
     const woodmerePickup = records.items.filter(
       (record) =>
         isTrue(record, BOXES_TO_YI_WOODMERE_FIELD_ID) &&
+        isEmptyRoute(record) &&
         isTrue(record, PICKUP_FIELD_ID),
     );
     const pickupsOnly = records.items.filter(
@@ -222,6 +224,10 @@ function coerceDisplayText(value: unknown): string {
 
 function isTrue(record: SmartSuiteRecord, fieldId: string): boolean {
   return record[fieldId] === true;
+}
+
+function isEmptyRoute(record: SmartSuiteRecord): boolean {
+  return !coerceDisplayText(record[ROUTE_NUMBER_FIELD_ID]);
 }
 
 function hasBoxSize(record: SmartSuiteRecord): boolean {
