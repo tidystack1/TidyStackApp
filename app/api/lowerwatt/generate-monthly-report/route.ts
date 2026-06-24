@@ -10,6 +10,7 @@ type LowerWattPayload = {
   repId?: string;
   repName?: string;
   repEmail?: string;
+  monthTitle?: string;
   commissions?: LowerWattCommission[];
   totalCommission?: number;
   totalLW?: number;
@@ -40,6 +41,7 @@ function formatPercent(value: number): string {
 function buildCommissionsHtml(payload: LowerWattPayload): string {
   const repName = escapeHtml(payload.repName?.trim() || "Unknown Rep");
   const repEmail = escapeHtml(payload.repEmail?.trim() || "No email provided");
+  const monthTitle = escapeHtml(payload.monthTitle?.trim() || "Current Month");
   const commissions = Array.isArray(payload.commissions) ? payload.commissions : [];
 
   const rowsHtml =
@@ -163,10 +165,11 @@ function buildCommissionsHtml(payload: LowerWattPayload): string {
       <div class="card">
         <div class="header">
           <h1>LowerWatt Commission Summary</h1>
-          <p>Monthly commission report</p>
+          <p>Monthly commission report - ${monthTitle}</p>
         </div>
         <div class="content">
           <div class="rep-meta">
+            <p><strong>Report Month:</strong> ${monthTitle}</p>
             <p><strong>Rep Name:</strong> ${repName}</p>
             <p><strong>Rep Email:</strong> ${repEmail}</p>
           </div>
@@ -208,6 +211,7 @@ export async function POST(request: Request): Promise<Response> {
       repId: payload.repId ?? null,
       repName: payload.repName ?? null,
       repEmail: payload.repEmail ?? null,
+      monthTitle: payload.monthTitle ?? null,
       html,
     });
   } catch (error) {
