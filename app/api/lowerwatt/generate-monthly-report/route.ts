@@ -1,3 +1,4 @@
+import { normalizePayload } from "../_shared/commissions";
 import { buildCommissionsHtml } from "../_shared/html-builder";
 import {
   buildCommissionsPdf,
@@ -8,16 +9,18 @@ import type { LowerWattPayload } from "../_shared/types";
 export async function POST(request: Request): Promise<Response> {
   try {
     const payload = (await request.json()) as LowerWattPayload;
-    const html = buildCommissionsHtml(payload);
-    const pdfBuffer = await buildCommissionsPdf(payload);
-    const pdfFilename = buildCommissionsPdfFilename(payload);
+    const normalized = normalizePayload(payload);
+    const html = buildCommissionsHtml(normalized);
+    const pdfBuffer = await buildCommissionsPdf(normalized);
+    const pdfFilename = buildCommissionsPdfFilename(normalized);
 
     return Response.json({
       company: "LowerWatt",
-      repId: payload.repId ?? null,
-      repName: payload.repName ?? null,
-      repEmail: payload.repEmail ?? null,
-      monthTitle: payload.monthTitle ?? null,
+      repId: normalized.repId ?? null,
+      repName: normalized.repName ?? null,
+      repEmail: normalized.repEmail ?? null,
+      monthTitle: normalized.monthTitle ?? null,
+      previousMonthTitle: normalized.previousMonthTitle ?? null,
       html,
       pdfFilename,
       pdfMimeType: "application/pdf",

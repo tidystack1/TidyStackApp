@@ -1,41 +1,95 @@
-import type { LowerWattPayload } from "./types";
+import type { LowerWattCommission } from "./types";
+import type { NormalizedRepPayload } from "./commissions";
 import { escapeHtml, formatCurrency, formatPercent } from "./format";
 
-export function buildCommissionsHtml(payload: LowerWattPayload): string {
-  const repName = escapeHtml(payload.repName?.trim() || "Unknown Rep");
-  const repEmail = escapeHtml(payload.repEmail?.trim() || "No email provided");
-  const monthTitle = escapeHtml(payload.monthTitle?.trim() || "Current Month");
-  const commissions = Array.isArray(payload.commissions) ? payload.commissions : [];
+function buildCommissionRowsHtml(
+  commissions: LowerWattCommission[],
+  emptyMessage: string,
+): string {
+  if (commissions.length === 0) {
+    return `
+      <tr>
+        <td colspan="5" style="text-align:center; color:#64748b;">${escapeHtml(emptyMessage)}</td>
+      </tr>
+    `;
+  }
 
-  const rowsHtml =
-    commissions.length > 0
-      ? commissions
-          .map((item) => {
-            const description = escapeHtml(item.description?.trim() || "N/A");
-            const gross = formatCurrency(Number(item.gross ?? 0));
-            const commissionRate = formatPercent(Number(item.commissionRate ?? 0));
-            const commissionAmount = formatCurrency(Number(item.commissionAmount ?? 0));
-            const lwAmount = formatCurrency(Number(item.lwAmount ?? 0));
+  return commissions
+    .map((item) => {
+      const notes = escapeHtml(item.notes?.trim() || item.description?.trim() || "N/A");
+      const gross = formatCurrency(Number(item.gross ?? 0));
+      const commissionRate = formatPercent(Number(item.commissionRate ?? 0));
+      const commissionAmount = formatCurrency(Number(item.commissionAmount ?? 0));
+      const lwAmount = formatCurrency(Number(item.lwAmount ?? 0));
 
-            return `
-              <tr>
-                <td>${description}</td>
-                <td>${gross}</td>
-                <td>${commissionRate}</td>
-                <td>${commissionAmount}</td>
-                <td>${lwAmount}</td>
-              </tr>
-            `;
-          })
-          .join("")
-      : `
+      return `
         <tr>
-          <td colspan="5" style="text-align:center; color:#64748b;">No commission records for this period.</td>
+          <td>${gross}</td>
+          <td>${commissionRate}</td>
+          <td>${commissionAmount}</td>
+          <td>${lwAmount}</td>
+          <td>${notes}</td>
         </tr>
       `;
+    })
+    .join("");
+}
 
-  const totalCommission = formatCurrency(Number(payload.totalCommission ?? 0));
-  const totalLW = formatCurrency(Number(payload.totalLW ?? 0));
+function buildCommissionSectionHtml(params: {
+  sectionTitle: string;
+  commissions: LowerWattCommission[];
+  emptyMessage: string;
+  totalCommission: number;
+  totalLW: number;
+}): string {
+  const { sectionTitle, commissions, emptyMessage, totalCommission, totalLW } = params;
+
+  return `
+    <section class="commission-section">
+      <h2>${escapeHtml(sectionTitle)}</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Gross</th>
+            <th>Commission Rate</th>
+            <th>Commission Amount</th>
+            <th>LW Amount</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${buildCommissionRowsHtml(commissions, emptyMessage)}
+        </tbody>
+      </table>
+      <div class="totals">
+        <p><strong>Total Commissions:</strong> ${formatCurrency(totalCommission)}</p>
+        <p><strong>Total LW:</strong> ${formatCurrency(totalLW)}</p>
+      </div>
+    </section>
+  `;
+}
+
+export function buildCommissionsHtml(payload: NormalizedRepPayload): string {
+  const repName = escapeHtml(payload.repName?.trim() || "Unknown Rep");
+  const repEmail = escapeHtml(payload.repEmail?.trim() || "No email provided");
+  const monthTitle = escapeHtml(payload.monthTitle);
+  const previousMonthTitle = escapeHtml(payload.previousMonthTitle);
+
+  const thisMonthSection = buildCommissionSectionHtml({
+    sectionTitle: payload.monthTitle,
+    commissions: payload.commissionThisMonth,
+    emptyMessage: "No commission records for this month.",
+    totalCommission: payload.totalCommissionThisMonth,
+    totalLW: payload.totalLWThisMonth,
+  });
+
+  const lastMonthSection = buildCommissionSectionHtml({
+    sectionTitle: payload.previousMonthTitle,
+    commissions: payload.commissionLastMonth,
+    emptyMessage: "No commission records for last month.",
+    totalCommission: payload.totalCommissionLastMonth,
+    totalLW: payload.totalLWLastMonth,
+  });
 
   return `
 <!doctype html>
@@ -93,6 +147,18 @@ export function buildCommissionsHtml(payload: LowerWattPayload): string {
         margin: 4px 0;
         font-size: 14px;
       }
+      .commission-section {
+        margin-bottom: 24px;
+      }
+      .commission-section:last-child {
+        margin-bottom: 0;
+      }
+      .commission-section h2 {
+        margin: 0 0 12px;
+        font-size: 16px;
+        font-weight: 700;
+        color: #0f172a;
+      }
       table {
         width: 100%;
         border-collapse: collapse;
@@ -108,7 +174,7 @@ export function buildCommissionsHtml(payload: LowerWattPayload): string {
         font-weight: 700;
       }
       .totals {
-        margin-top: 18px;
+        margin-top: 12px;
         padding: 14px 16px;
         background: #f8fafc;
         border: 1px solid #e2e8f0;
@@ -133,29 +199,13 @@ export function buildCommissionsHtml(payload: LowerWattPayload): string {
         <div class="content">
           <div class="rep-meta">
             <p><strong>Report Month:</strong> ${monthTitle}</p>
+            <p><strong>Previous Month:</strong> ${previousMonthTitle}</p>
             <p><strong>Rep Name:</strong> ${repName}</p>
             <p><strong>Rep Email:</strong> ${repEmail}</p>
           </div>
 
-          <table>
-            <thead>
-              <tr>
-                <th>Description</th>
-                <th>Gross</th>
-                <th>Commission Rate</th>
-                <th>Commission Amount</th>
-                <th>LW Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rowsHtml}
-            </tbody>
-          </table>
-
-          <div class="totals">
-            <p><strong>Total Commissions:</strong> ${totalCommission}</p>
-            <p><strong>Total LW:</strong> ${totalLW}</p>
-          </div>
+          ${thisMonthSection}
+          ${lastMonthSection}
         </div>
       </div>
     </div>
