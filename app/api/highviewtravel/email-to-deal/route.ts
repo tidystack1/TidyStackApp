@@ -262,7 +262,11 @@ export async function POST(request: NextRequest) {
     const rawEml = await resolveEmlContent(body);
     const parsed = parseEml(rawEml);
     const booking = await extractBookingFromEmail(parsed);
-    const deal = await createHubSpotDealFromBooking(booking, parsed.from);
+    const deal = await createHubSpotDealFromBooking(
+      booking,
+      parsed.from,
+      parsed.to,
+    );
 
     return NextResponse.json({
       success: true,
@@ -280,6 +284,9 @@ export async function POST(request: NextRequest) {
       contactId: deal.contactId,
       contactEmail: deal.contactEmail,
       contactAssociated: deal.contactAssociated,
+      ownerId: deal.ownerId,
+      ownerEmail: deal.ownerEmail,
+      ownerAssigned: deal.ownerAssigned,
     });
   } catch (error) {
     console.error("[email-to-deal] Error:", error);

@@ -65,21 +65,29 @@ function getHubSpotToken(): string {
   return token;
 }
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function extractEmailAddress(headerValue: string): string | null {
+  return extractAllEmailAddresses(headerValue)[0] ?? null;
+}
+
+export function extractAllEmailAddresses(headerValue: string): string[] {
   const trimmed = headerValue.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return [];
 
-  const angle = /<([^>]+)>/.exec(trimmed);
-  if (angle?.[1]) {
-    return angle[1].trim().toLowerCase();
+  const emails: string[] = [];
+  for (const match of trimmed.matchAll(/<([^>]+)>/g)) {
+    const email = match[1]!.trim().toLowerCase();
+    if (EMAIL_PATTERN.test(email)) emails.push(email);
+  }
+  if (emails.length > 0) return emails;
+
+  for (const part of trimmed.split(",")) {
+    const email = part.trim().toLowerCase();
+    if (EMAIL_PATTERN.test(email)) emails.push(email);
   }
 
-  const email = trimmed.toLowerCase();
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return email;
-  }
-
-  return null;
+  return emails;
 }
 
 async function hubSpotFetch(
@@ -101,6 +109,7 @@ function buildDealProperties(
   booking: BookingExtraction,
   pipelineId: string,
   stageId: string,
+  ownerId?: string,
 ): Record<string, string> {
   const properties: Record<string, string> = {
     dealname: buildDealName(booking),
@@ -108,6 +117,8 @@ function buildDealProperties(
     dealstage: stageId,
     quote_request_type: "New request",
   };
+
+  if (ownerId) properties.hubspot_owner_id = ownerId;
 
   const cabinClass = cabinClassPropertyValue(booking.cabinClass);
   if (cabinClass) properties.cabin_class = cabinClass;
@@ -164,6 +175,36 @@ async function findContactByEmail(
   return json.results?.[0]?.id ?? null;
 }
 
+async function findOwnerIdByEmail(
+  email: string,
+  token: string,
+): Promise<string | null> {
+  const res = await hubSpotFetch(
+    `/crm/v3/owners?email=${encodeURIComponent(email)}&limit=1`,
+    token,
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HubSpot owner lookup failed (${res.status}): ${text}`);
+  }
+
+  const json = (await res.json()) as { results?: Array<{ id: string }> };
+  return json.results?.[0]?.id ?? null;
+}
+
+async function resolveOwnerFromToHeader(
+  toHeader: string,
+  token: string,
+): Promise<{ ownerId: string | null; ownerEmail: string | null }> {
+  for (const email of extractAllEmailAddresses(toHeader)) {
+    const ownerId = await findOwnerIdByEmail(email, token);
+    if (ownerId) return { ownerId, ownerEmail: email };
+  }
+
+  return { ownerId: null, ownerEmail: null };
+}
+
 async function associateDealWithContact(
   dealId: string,
   contactId: string,
@@ -189,11 +230,15 @@ export type CreateDealResult = {
   contactEmail: string;
   contactId: string | null;
   contactAssociated: boolean;
+  ownerEmail: string | null;
+  ownerId: string | null;
+  ownerAssigned: boolean;
 };
 
 export async function createHubSpotDealFromBooking(
   booking: BookingExtraction,
   fromHeader: string,
+  toHeader: string,
 ): Promise<CreateDealResult> {
   const token = getHubSpotToken();
   const contactEmail = extractEmailAddress(fromHeader);
@@ -202,7 +247,13 @@ export async function createHubSpotDealFromBooking(
   }
 
   const { pipelineId, stageId } = await resolvePipelineAndStage(token);
-  const properties = buildDealProperties(booking, pipelineId, stageId);
+  const { ownerId, ownerEmail } = await resolveOwnerFromToHeader(toHeader, token);
+  const properties = buildDealProperties(
+    booking,
+    pipelineId,
+    stageId,
+    ownerId ?? undefined,
+  );
 
   const res = await hubSpotFetch("/crm/v3/objects/deals", token, {
     method: "POST",
@@ -227,5 +278,8 @@ export async function createHubSpotDealFromBooking(
     contactEmail,
     contactId,
     contactAssociated: contactId !== null,
+    ownerEmail,
+    ownerId,
+    ownerAssigned: ownerId !== null,
   };
 }
