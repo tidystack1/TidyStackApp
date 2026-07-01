@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchDealEmailContext } from "../_shared/fetch-deal-email-context";
+import { fetchNewDealNotification } from "../_shared/fetch-new-deal-notification";
 
-/** Vercel serverless limit (default 10s); this route chains several HubSpot calls. */
+/** Vercel serverless limit (default 10s); chains several HubSpot calls. */
 export const maxDuration = 50;
 
 function parseDealId(body: Record<string, unknown>): string {
@@ -37,26 +37,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`[get-info-for-email-file] Fetching context for deal ${dealId}`);
-    const payload = await fetchDealEmailContext(dealId);
+    console.log(
+      `[notification-of-new-deal] Evaluating deal ${dealId} for Customer.io`,
+    );
+    const payload = await fetchNewDealNotification(dealId);
 
     return NextResponse.json({
       success: true,
       ...payload,
     });
   } catch (error) {
-    console.error("[get-info-for-email-file] Error:", error);
-    const message = error instanceof Error ? error.message : String(error);
-    const status = message.includes("No contact") || message.includes("No company")
-      ? 404
-      : 500;
-
+    console.error("[notification-of-new-deal] Error:", error);
     return NextResponse.json(
       {
-        error: "Failed to fetch deal email context",
-        details: message,
+        error: "Failed to evaluate new deal notification",
+        details: error instanceof Error ? error.message : String(error),
       },
-      { status },
+      { status: 500 },
     );
   }
 }
