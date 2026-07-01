@@ -96,8 +96,15 @@ function countDealsOnContact(value: unknown): number {
       .length;
     return n || 1;
   }
-  if (typeof value === "number") return 1;
-  const segments = String(value)
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : 1;
+  }
+  const text = String(value).trim();
+  if (/^\d+$/.test(text)) {
+    const n = parseInt(text, 10);
+    return n > 0 ? n : 1;
+  }
+  const segments = text
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
