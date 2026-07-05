@@ -18,6 +18,7 @@ type SmartSuiteEmployeeListResponse = {
 };
 
 const SMARTSUITE_ATTACHMENT_FIELD_ID = "s1d6347da1";
+const SMARTSUITE_REMAINING_CASH_FIELD_ID = "s29d68347a";
 const SMARTSUITE_EMPLOYEE_TABLE_ID = "69695887db422e6eb4cea61c";
 const SMARTSUITE_EMPLOYEE_EMAIL_FIELD_ID = "s13b288a1b";
 const SMARTSUITE_EMPLOYEE_LINK_FIELD_ID = "sf7d6cba84";
@@ -61,6 +62,17 @@ function buildFullName(first?: string, last?: string): string | undefined {
   const trimmedLast = last?.trim();
   if (trimmedFirst && trimmedLast) return `${trimmedFirst} ${trimmedLast}`;
   return trimmedFirst ?? trimmedLast ?? undefined;
+}
+
+function coerceZohoNumber(value: unknown): number | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "number" && !Number.isNaN(value)) return value;
+  if (typeof value === "string") {
+    const cleaned = value.replace(/[^0-9.-]/g, "");
+    const parsed = Number(cleaned);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 function getSmartSuiteConfig() {
@@ -129,6 +141,11 @@ function buildSmartSuitePayload(
 
       if (requesterEmail ?? employeeEmail) {
         payload.s0df5a9f6c = [requesterEmail ?? employeeEmail!];
+      }
+
+      const remainingCash = coerceZohoNumber(record["Remaining_Cash_in_Hand"]);
+      if (remainingCash != null) {
+        payload[SMARTSUITE_REMAINING_CASH_FIELD_ID] = remainingCash;
       }
     } else {
       if (employeeName) {

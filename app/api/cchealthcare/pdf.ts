@@ -44,6 +44,7 @@ type RecordInfo = {
   employee?: string;
   employeeLastName?: string;
   employeeEmail?: string;
+  remainingCashInHand?: unknown;
   totalMiles?: unknown;
   totalMilesMultiplied?: unknown;
 };
@@ -74,7 +75,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeFiles(
-  fileUploadValue: unknown
+  fileUploadValue: unknown,
 ): Array<Record<string, unknown>> {
   if (!fileUploadValue) return [];
   if (Array.isArray(fileUploadValue)) return fileUploadValue.filter(isRecord);
@@ -108,7 +109,7 @@ function coerceZohoFieldText(value: unknown): string | null {
 
 function extractRecordInfo(
   recordDetails: unknown,
-  formType: FormType
+  formType: FormType,
 ): RecordInfo {
   try {
     const details = recordDetails as ZohoRecordDetails;
@@ -125,14 +126,17 @@ function extractRecordInfo(
         coerceZohoFieldText(record["Reimbusment_For"]) ?? undefined,
       facility: coerceZohoFieldText(record["Facility"]) ?? undefined,
       employee: isPettyCash
-        ? coerceZohoFieldText(record["Requested_by_First_Name"]) ?? undefined
-        : coerceZohoFieldText(record["Employee"]) ?? undefined,
+        ? (coerceZohoFieldText(record["Requested_by_First_Name"]) ?? undefined)
+        : (coerceZohoFieldText(record["Employee"]) ?? undefined),
       employeeLastName: isPettyCash
-        ? coerceZohoFieldText(record["Requested_by_Last_Name"]) ?? undefined
-        : coerceZohoFieldText(record["Employee_Last_Name"]) ?? undefined,
+        ? (coerceZohoFieldText(record["Requested_by_Last_Name"]) ?? undefined)
+        : (coerceZohoFieldText(record["Employee_Last_Name"]) ?? undefined),
       employeeEmail: isPettyCash
-        ? coerceZohoFieldText(record["Requested_by_Email"]) ?? undefined
-        : coerceZohoFieldText(record["Employee_Email"]) ?? undefined,
+        ? (coerceZohoFieldText(record["Requested_by_Email"]) ?? undefined)
+        : (coerceZohoFieldText(record["Employee_Email"]) ?? undefined),
+      remainingCashInHand: isPettyCash
+        ? record["Remaining_Cash_in_Hand"]
+        : undefined,
       totalMiles: isMileage ? record["Total_Miles"] : undefined,
       totalMilesMultiplied: isMileage
         ? record["Total_Miles_multiplied"]
@@ -175,7 +179,7 @@ function extractExpenseReimbursementRows(recordDetails: unknown): ExpenseRow[] {
   } catch (error) {
     console.error(
       "[CCHEALTHCARE] Error extracting expense reimbursement rows:",
-      error
+      error,
     );
     return [];
   }
@@ -218,14 +222,14 @@ function extractMileageReimbursementRows(recordDetails: unknown): MileageRow[] {
   } catch (error) {
     console.error(
       "[CCHEALTHCARE] Error extracting mileage reimbursement rows:",
-      error
+      error,
     );
     return [];
   }
 }
 
 function extractMileageFormUploads(
-  recordDetails: unknown
+  recordDetails: unknown,
 ): Array<Record<string, unknown>> {
   try {
     const details = recordDetails as ZohoRecordDetails;
@@ -238,7 +242,7 @@ function extractMileageFormUploads(
   } catch (error) {
     console.error(
       "[CCHEALTHCARE] Error extracting mileage form upload:",
-      error
+      error,
     );
     return [];
   }
@@ -253,8 +257,8 @@ function calculateTotalMiles(mileageRows: MileageRow[]): number {
         typeof miles === "number"
           ? miles
           : typeof miles === "string"
-          ? Number(miles) || 0
-          : 0;
+            ? Number(miles) || 0
+            : 0;
       total += milesNum;
     }
   }
@@ -343,7 +347,7 @@ function headerLinesForRow(row: ExpenseRow | MileageRow): string[] {
 function buildFileUploadGroups(
   subformRows: Array<ExpenseRow | MileageRow>,
   formType: FormType,
-  mileageFormUploads: Array<Record<string, unknown>>
+  mileageFormUploads: Array<Record<string, unknown>>,
 ): FileUploadGroup[] {
   if (formType === "mileage-reimbursement") {
     return mileageFormUploads.length
@@ -509,7 +513,7 @@ async function downloadFileUploads(uploadGroups: FileUploadGroup[]) {
     throw new Error(
       `Zoho OAuth scope mismatch while downloading files. Your refresh token likely lacks a required scope for file download (e.g. ZohoCRM.files.READ). Details: ${
         oauthScopeMismatchDetails ?? "OAUTH_SCOPE_MISMATCH"
-      }`
+      }`,
     );
   }
 
@@ -570,7 +574,7 @@ async function createSummaryPage(
   pdfDoc: PDFDocument,
   recordInfo: RecordInfo,
   subformRows: ExpenseRow[] | MileageRow[],
-  formType: FormType
+  formType: FormType,
 ): Promise<void> {
   const pageWidth = 612;
   const pageHeight = 792;
@@ -592,8 +596,8 @@ async function createSummaryPage(
     formType === "petty-cash"
       ? "Petty Cash Form"
       : formType === "mileage-reimbursement"
-      ? "Mileage Reimbursement Form"
-      : "Expense Reimbursement Form";
+        ? "Mileage Reimbursement Form"
+        : "Expense Reimbursement Form";
   const titleFontSize = boldFontSize + 4;
   page.drawText(formTitle, {
     x: margin,
@@ -653,6 +657,16 @@ async function createSummaryPage(
     y -= lineHeight;
   }
 
+  if (formType === "petty-cash" && recordInfo.remainingCashInHand != null) {
+    const remainingCashDisplay = formatAmountForTable(
+      recordInfo.remainingCashInHand,
+    );
+    if (remainingCashDisplay) {
+      drawLabelValue("Remaining Cash in Hand:", remainingCashDisplay);
+      y -= lineHeight;
+    }
+  }
+
   y -= lineHeight;
 
   const tableTopY = y;
@@ -664,7 +678,7 @@ async function createSummaryPage(
     x: number,
     yTop: number,
     width: number,
-    height: number
+    height: number,
   ) {
     page.drawRectangle({
       x,
@@ -682,7 +696,7 @@ async function createSummaryPage(
     yTop: number,
     width: number,
     fontToUse: PDFFont,
-    size: number
+    size: number,
   ) {
     const textWidth = fontToUse.widthOfTextAtSize(text, size);
     const textX = x + Math.max(0, (width - textWidth) / 2);
@@ -721,7 +735,7 @@ async function createSummaryPage(
     width: number,
     fontToUse: PDFFont,
     size: number,
-    rowHeight: number
+    rowHeight: number,
   ) {
     const totalTextHeight = lines.length * cellLineHeight;
     let drawY =
@@ -785,7 +799,7 @@ async function createSummaryPage(
         headerTopY,
         colWidths.date,
         boldFont,
-        fontSize
+        fontSize,
       );
       drawCenteredText(
         "Origin Address",
@@ -793,7 +807,7 @@ async function createSummaryPage(
         headerTopY,
         colWidths.origin,
         boldFont,
-        fontSize
+        fontSize,
       );
       drawCenteredText(
         "Destination Address",
@@ -801,7 +815,7 @@ async function createSummaryPage(
         headerTopY,
         colWidths.destination,
         boldFont,
-        fontSize
+        fontSize,
       );
       drawCenteredText(
         "Purpose",
@@ -809,7 +823,7 @@ async function createSummaryPage(
         headerTopY,
         colWidths.purpose,
         boldFont,
-        fontSize
+        fontSize,
       );
       drawCenteredText(
         "Miles",
@@ -817,7 +831,7 @@ async function createSummaryPage(
         headerTopY,
         colWidths.miles,
         boldFont,
-        fontSize
+        fontSize,
       );
     }
 
@@ -864,11 +878,11 @@ async function createSummaryPage(
       const originLines = wrapText(originAddress, colWidths.origin);
       const destinationLines = wrapText(
         destinationAddress,
-        colWidths.destination
+        colWidths.destination,
       );
       const purposeLines = wrapText(
         truncate(purposeStr, colWidths.purpose),
-        colWidths.purpose
+        colWidths.purpose,
       );
       const milesLines = wrapText(milesStr, colWidths.miles);
 
@@ -877,7 +891,7 @@ async function createSummaryPage(
         originLines.length,
         destinationLines.length,
         purposeLines.length,
-        milesLines.length
+        milesLines.length,
       );
       const rowHeight = Math.max(baseRowHeight, maxLines * cellLineHeight + 6);
 
@@ -895,7 +909,7 @@ async function createSummaryPage(
         colWidths.date,
         font,
         fontSize,
-        rowHeight
+        rowHeight,
       );
       drawCenteredLines(
         originLines,
@@ -904,7 +918,7 @@ async function createSummaryPage(
         colWidths.origin,
         font,
         fontSize,
-        rowHeight
+        rowHeight,
       );
       drawCenteredLines(
         destinationLines,
@@ -913,7 +927,7 @@ async function createSummaryPage(
         colWidths.destination,
         font,
         fontSize,
-        rowHeight
+        rowHeight,
       );
       drawCenteredLines(
         purposeLines,
@@ -922,7 +936,7 @@ async function createSummaryPage(
         colWidths.purpose,
         font,
         fontSize,
-        rowHeight
+        rowHeight,
       );
       drawCenteredLines(
         milesLines,
@@ -931,7 +945,7 @@ async function createSummaryPage(
         colWidths.miles,
         font,
         fontSize,
-        rowHeight
+        rowHeight,
       );
 
       currentTopY -= rowHeight;
@@ -1007,7 +1021,7 @@ async function createSummaryPage(
       headerTopY,
       colWidths.date,
       boldFont,
-      fontSize
+      fontSize,
     );
     drawCenteredText(
       "Expense Type",
@@ -1015,7 +1029,7 @@ async function createSummaryPage(
       headerTopY,
       colWidths.expenseType,
       boldFont,
-      fontSize
+      fontSize,
     );
     drawCenteredText(
       "Purpose",
@@ -1023,7 +1037,7 @@ async function createSummaryPage(
       headerTopY,
       colWidths.purpose,
       boldFont,
-      fontSize
+      fontSize,
     );
     drawCenteredText(
       "Amount ($)",
@@ -1031,7 +1045,7 @@ async function createSummaryPage(
       headerTopY,
       colWidths.amount,
       boldFont,
-      fontSize
+      fontSize,
     );
   }
 
@@ -1057,8 +1071,8 @@ async function createSummaryPage(
       typeof row.amount === "number"
         ? row.amount
         : typeof row.amount === "string"
-        ? Number(row.amount) || 0
-        : 0;
+          ? Number(row.amount) || 0
+          : 0;
     totalAmount += amountNum;
 
     const truncate = (text: string, maxWidth: number) => {
@@ -1075,11 +1089,11 @@ async function createSummaryPage(
     const dateLines = wrapText(dateStr, colWidths.date);
     const expenseTypeLines = wrapText(
       truncate(expenseTypeStr, colWidths.expenseType),
-      colWidths.expenseType
+      colWidths.expenseType,
     );
     const purposeLines = wrapText(
       truncate(purposeStr, colWidths.purpose),
-      colWidths.purpose
+      colWidths.purpose,
     );
     const amountLines = wrapText(amountStr, colWidths.amount);
 
@@ -1088,7 +1102,7 @@ async function createSummaryPage(
       dateLines.length,
       expenseTypeLines.length,
       purposeLines.length,
-      amountLines.length
+      amountLines.length,
     );
     const rowHeight = Math.max(baseRowHeight, maxLines * cellLineHeight + 6);
 
@@ -1106,7 +1120,7 @@ async function createSummaryPage(
       colWidths.rowNumber,
       font,
       fontSize,
-      rowHeight
+      rowHeight,
     );
     drawCenteredLines(
       dateLines,
@@ -1115,7 +1129,7 @@ async function createSummaryPage(
       colWidths.date,
       font,
       fontSize,
-      rowHeight
+      rowHeight,
     );
     drawCenteredLines(
       expenseTypeLines,
@@ -1124,7 +1138,7 @@ async function createSummaryPage(
       colWidths.expenseType,
       font,
       fontSize,
-      rowHeight
+      rowHeight,
     );
     drawCenteredLines(
       purposeLines,
@@ -1133,7 +1147,7 @@ async function createSummaryPage(
       colWidths.purpose,
       font,
       fontSize,
-      rowHeight
+      rowHeight,
     );
     drawCenteredLines(
       amountLines,
@@ -1142,7 +1156,7 @@ async function createSummaryPage(
       colWidths.amount,
       font,
       fontSize,
-      rowHeight
+      rowHeight,
     );
 
     currentTopY -= rowHeight;
@@ -1166,7 +1180,7 @@ async function combinePDFsAndImages(
   imageItems: ImageItem[],
   recordInfo: RecordInfo,
   subformRows: ExpenseRow[] | MileageRow[],
-  formType: FormType
+  formType: FormType,
 ): Promise<Buffer> {
   const mergedPdf = await PDFDocument.create();
   const headerFont = await mergedPdf.embedFont(StandardFonts.Helvetica);
@@ -1259,7 +1273,7 @@ async function combinePDFsAndImages(
       } catch (embedError) {
         console.error(
           `[CCHEALTHCARE] Failed to embed ${type.toUpperCase()} image ${fileName}:`,
-          embedError
+          embedError,
         );
         throw embedError;
       }
@@ -1294,7 +1308,7 @@ async function combinePDFsAndImages(
     } catch (error) {
       console.error(
         `[CCHEALTHCARE] Error converting image ${imageItems[i].fileName}:`,
-        error
+        error,
       );
     }
   }
@@ -1305,7 +1319,7 @@ async function combinePDFsAndImages(
 
 export async function buildReimbursementPdf(
   recordDetails: unknown,
-  formType: FormType
+  formType: FormType,
 ): Promise<Buffer> {
   const recordInfo = extractRecordInfo(recordDetails, formType);
   const subformRows =
@@ -1315,7 +1329,7 @@ export async function buildReimbursementPdf(
 
   if (formType === "mileage-reimbursement") {
     const totalMiles = calculateTotalMiles(subformRows as MileageRow[]);
-    const totalAmount = totalMiles * 0.73;
+    const totalAmount = totalMiles * 0.725;
     recordInfo.totalMiles = totalMiles;
     recordInfo.totalMilesMultiplied = totalAmount;
   }
@@ -1327,7 +1341,7 @@ export async function buildReimbursementPdf(
   const uploadGroups = buildFileUploadGroups(
     subformRows,
     formType,
-    mileageFormUploads
+    mileageFormUploads,
   );
   const totalFiles = uploadGroups.reduce((sum, group) => {
     return sum + group.files.length;
@@ -1337,8 +1351,8 @@ export async function buildReimbursementPdf(
     const message = isMileage
       ? "No trips found in Mileage Reimbursement subform"
       : formType === "petty-cash"
-      ? "No rows found in Petty Cash subform"
-      : "No rows found in Expense Reimbursement subform";
+        ? "No rows found in Petty Cash subform"
+        : "No rows found in Expense Reimbursement subform";
     throw new Error(message);
   }
 
@@ -1366,6 +1380,6 @@ export async function buildReimbursementPdf(
     imageItems,
     recordInfo,
     subformRows,
-    formType
+    formType,
   );
 }
