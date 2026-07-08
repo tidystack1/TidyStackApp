@@ -54,6 +54,7 @@ function resolveReps(payload: unknown): AdminSummaryRep[] {
   const candidate = payload as Record<string, unknown>;
   const reps =
     candidate.reps ??
+    candidate.summary ??
     candidate.report ??
     candidate.data ??
     candidate.results ??
