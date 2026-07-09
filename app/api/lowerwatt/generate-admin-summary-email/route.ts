@@ -16,7 +16,7 @@ type AdminSummaryRep = {
   rep_email?: unknown;
   total_commission?: unknown;
   total_lw?: unknown;
-  records?: unknown;
+  commissionThisMonth?: unknown;
 };
 
 function toNumber(value: unknown): number {
@@ -102,8 +102,8 @@ function buildRepSection(rep: AdminSummaryRep): string {
   const repName = escapeHtml(asString(rep.rep_name, "Unknown Rep"));
   const repEmail = escapeHtml(asString(rep.rep_email, "No email provided"));
   const repId = escapeHtml(asString(rep.rep_id, "N/A"));
-  const records = Array.isArray(rep.records)
-    ? (rep.records as AdminSummaryRecord[])
+  const records = Array.isArray(rep.commissionThisMonth)
+    ? (rep.commissionThisMonth as AdminSummaryRecord[])
     : [];
 
   const calculatedCommissionTotal = records.reduce(
