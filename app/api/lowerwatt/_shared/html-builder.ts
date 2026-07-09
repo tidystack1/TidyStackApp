@@ -28,8 +28,8 @@ function buildCommissionRowsHtml(
         <tr>
           <td>${gross}</td>
           <td>${commissionAmount}</td>
-          <td>${adjustment}</td>
-          <td>${commissionTotal}</td>
+          <td class="col-adjustment">${adjustment}</td>
+          <td class="col-commission-total">${commissionTotal}</td>
           <td>${commissionRate}</td>
           <td>${lwAmount}</td>
           <td>${notes}</td>
@@ -56,8 +56,8 @@ function buildCommissionSectionHtml(params: {
           <tr>
             <th>Gross</th>
             <th>Commission Amount</th>
-            <th>Adjustment</th>
-            <th>Commission Total</th>
+            <th class="col-adjustment">Adjustment</th>
+            <th class="col-commission-total">Commission Total</th>
             <th>Commission Rate</th>
             <th>LW Amount</th>
             <th>Notes</th>
@@ -178,6 +178,14 @@ export function buildCommissionsHtml(payload: NormalizedRepPayload): string {
       th {
         background: #f1f5f9;
         font-weight: 700;
+      }
+      th.col-adjustment,
+      td.col-adjustment {
+        padding-right: 28px;
+      }
+      th.col-commission-total,
+      td.col-commission-total {
+        padding-left: 28px;
       }
       .totals {
         margin-top: 12px;

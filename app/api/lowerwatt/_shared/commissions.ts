@@ -75,7 +75,7 @@ function normalizeCommissionList(
 function sumCommissionTotals(commissions: LowerWattCommission[]) {
   return commissions.reduce(
     (totals, item) => ({
-      totalCommission: totals.totalCommission + Number(item.commissionAmount ?? 0),
+      totalCommission: totals.totalCommission + Number(item.commissionTotal ?? 0),
       totalLW: totals.totalLW + Number(item.lwAmount ?? 0),
     }),
     { totalCommission: 0, totalLW: 0 },

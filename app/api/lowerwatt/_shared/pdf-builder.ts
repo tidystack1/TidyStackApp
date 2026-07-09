@@ -33,11 +33,11 @@ type PdfColumn = {
 const COLUMNS: PdfColumn[] = [
   { key: "gross", label: "Gross", width: 58, align: "right" },
   { key: "commissionAmount", label: "Commission", width: 68, align: "right" },
-  { key: "adjustment", label: "Adjustment", width: 62, align: "right" },
-  { key: "commissionTotal", label: "Commission Total", width: 78, align: "right" },
+  { key: "adjustment", label: "Adjustment", width: 74, align: "right" },
+  { key: "commissionTotal", label: "Commission Total", width: 90, align: "right" },
   { key: "commissionRate", label: "Rate", width: 40, align: "right" },
   { key: "lwAmount", label: "LW Amount", width: 62, align: "right" },
-  { key: "notes", label: "Notes", width: 148, align: "left" },
+  { key: "notes", label: "Notes", width: 124, align: "left" },
 ];
 
 const TABLE_FONT_SIZE = 9;
