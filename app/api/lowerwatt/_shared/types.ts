@@ -10,14 +10,28 @@ export type LowerWattCommission = {
   lwAmount?: number;
 };
 
+/** Incoming commission row — camelCase or snake_case */
+export type LowerWattCommissionInput = LowerWattCommission & {
+  gross_amount?: number;
+  commission_rate?: number;
+  commission_amount?: number;
+  lw_rate?: number;
+  lw_amount?: number;
+};
+
 export type LowerWattPayload = {
   repId?: string;
   repName?: string;
   repEmail?: string;
+  rep_id?: string;
+  rep_name?: string;
+  rep_email?: string;
   monthTitle?: string;
   previousMonthTitle?: string;
-  commissionThisMonth?: LowerWattCommission[];
-  commissionLastMonth?: LowerWattCommission[];
+  commissionThisMonth?: LowerWattCommissionInput[];
+  commissionLastMonth?: LowerWattCommissionInput[];
   /** @deprecated Use commissionThisMonth */
-  commissions?: LowerWattCommission[];
+  commissions?: LowerWattCommissionInput[];
+  /** Alias for this month's commission rows */
+  records?: LowerWattCommissionInput[];
 };
