@@ -22,6 +22,39 @@ const HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID = "25756531";
 const HUBSPOT_DEAL_FORMSTACK_DEFAULT_PDF_PROPERTY = "form_result__client_email";
 /** Deal single-line text — set to "Completed" when form PDF is generated */
 const HUBSPOT_DEAL_LINK_STATUS_PROPERTY = "link_status";
+/** Deal dropdown — Payment type */
+const HUBSPOT_DEAL_PAYMENT_TYPE_PROPERTY = "what_kind_of_sale_";
+/** Deal date — Start Travel Date */
+const HUBSPOT_DEAL_START_TRAVEL_DATE_PROPERTY = "start_travel_date";
+/** Deal date — Sale Date */
+const HUBSPOT_DEAL_SALE_DATE_PROPERTY = "sale_date";
+/** Deal multi-owner — collaborators (semicolon-prepended owner IDs) */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- re-enable with collaborator block in POST
+const HUBSPOT_DEAL_COLLABORATOR_PROPERTY = "hs_all_collaborator_owner_ids";
+
+/** Sales agent email → Assist team collaborator email */
+const SALES_AGENT_TO_COLLABORATOR_EMAIL: Record<string, string> = {
+  "lisa@highviewtravel.com": "alison@highviewtravel.com",
+  "becca@highviewtravel.com": "alison@highviewtravel.com",
+  "dina@highviewtravel.com": "doris@highviewtravel.com",
+  "kathy@highviewtravel.com": "laiza@highviewtravel.com",
+  "emily@highviewtravel.com": "andrely@highviewtravel.com",
+};
+
+const MONTH_ABBREV_TO_INDEX: Record<string, number> = {
+  JAN: 0,
+  FEB: 1,
+  MAR: 2,
+  APR: 3,
+  MAY: 4,
+  JUN: 5,
+  JUL: 6,
+  AUG: 7,
+  SEP: 8,
+  OCT: 9,
+  NOV: 10,
+  DEC: 11,
+};
 
 function currency(value: string): string {
   const n = parseFloat(value);
@@ -63,6 +96,159 @@ function escapeHtml(value: string): string {
 
 function withLineBreaks(value: string): string {
   return escapeHtml(value).replaceAll(/\r?\n/g, "<br/>");
+}
+
+/** HubSpot date properties expect YYYY-MM-DD. */
+function formatHubSpotDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Payment type (`what_kind_of_sale_`) from Form Type / Form of payment.
+ * Wire/Check takes priority when Form of payment is Wire or Check.
+ */
+function resolvePaymentType(data: FormData): string | null {
+  const formOfPayment = str(data, "Form of payment").toLowerCase();
+  if (formOfPayment === "wire" || formOfPayment === "check") {
+    return "Wire/Check";
+  }
+
+  const formType = str(data, "Form Type");
+  if (formType === "Net Rate + CC Fee") {
+    return "Internal Charge";
+  }
+  if (
+    formType === "Commission off Published Rate" ||
+    formType === "Net Rate (NO CC Fee)"
+  ) {
+    return "On PAX CC";
+  }
+
+  return null;
+}
+
+/**
+ * Parse first DDMMM (e.g. 11NOV) from deal name.
+ * Year is the next occurrence of that month/day from today (today counts).
+ */
+function parseStartTravelDateFromDealName(
+  dealName: string,
+  now = new Date(),
+): string | null {
+  const re = /(\d{1,2})([A-Za-z]{3})/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(dealName)) !== null) {
+    const day = parseInt(match[1] ?? "", 10);
+    const monthKey = (match[2] ?? "").toUpperCase();
+    const month = MONTH_ABBREV_TO_INDEX[monthKey];
+    if (month === undefined || Number.isNaN(day) || day < 1 || day > 31) {
+      continue;
+    }
+
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let candidate = new Date(today.getFullYear(), month, day);
+    if (candidate.getMonth() !== month || candidate.getDate() !== day) {
+      continue; // invalid calendar date (e.g. 31FEB)
+    }
+    if (candidate < today) {
+      candidate = new Date(today.getFullYear() + 1, month, day);
+    }
+
+    return formatHubSpotDate(candidate);
+  }
+
+  return null;
+}
+
+async function findOwnerIdByEmail(
+  email: string,
+  token: string,
+): Promise<string | null> {
+  const res = await fetch(
+    `https://api.hubapi.com/crm/v3/owners?email=${encodeURIComponent(email)}&limit=1`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HubSpot owner lookup failed (${res.status}): ${text}`);
+  }
+
+  const json = (await res.json()) as { results?: Array<{ id: string }> };
+  return json.results?.[0]?.id ?? null;
+}
+
+async function getDealOwnerEmail(
+  dealId: string,
+  token: string,
+): Promise<string | null> {
+  const res = await fetch(
+    `https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=hubspot_owner_id`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HubSpot deal read failed (${res.status}): ${text}`);
+  }
+
+  const json = (await res.json()) as {
+    properties?: { hubspot_owner_id?: string | null };
+  };
+  const ownerId = json.properties?.hubspot_owner_id?.trim();
+  if (!ownerId) return null;
+
+  const ownerRes = await fetch(
+    `https://api.hubapi.com/crm/v3/owners/${ownerId}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (!ownerRes.ok) {
+    const text = await ownerRes.text();
+    throw new Error(`HubSpot owner lookup failed (${ownerRes.status}): ${text}`);
+  }
+
+  const ownerJson = (await ownerRes.json()) as { email?: string };
+  return ownerJson.email?.trim().toLowerCase() || null;
+}
+
+/**
+ * Map deal sales agent → Assist collaborator; returns HubSpot property value
+ * (`;{ownerId}`) or null if no match / owner not found.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- re-enable with collaborator block in POST
+async function resolveCollaboratorOwnerIds(
+  dealId: string,
+  token: string,
+): Promise<string | null> {
+  const ownerEmail = await getDealOwnerEmail(dealId, token);
+  if (!ownerEmail) {
+    console.log(
+      `[submitFormPDF] Deal ${dealId} has no owner; skipping collaborator`,
+    );
+    return null;
+  }
+
+  const collaboratorEmail = SALES_AGENT_TO_COLLABORATOR_EMAIL[ownerEmail];
+  if (!collaboratorEmail) {
+    console.log(
+      `[submitFormPDF] No collaborator mapping for owner ${ownerEmail}; skipping`,
+    );
+    return null;
+  }
+
+  const collaboratorId = await findOwnerIdByEmail(collaboratorEmail, token);
+  if (!collaboratorId) {
+    console.warn(
+      `[submitFormPDF] Collaborator owner not found for ${collaboratorEmail}`,
+    );
+    return null;
+  }
+
+  return `;${collaboratorId}`;
 }
 
 function row(label: string, value: string): string {
@@ -418,10 +604,36 @@ export async function POST(request: NextRequest) {
       [HUBSPOT_DEAL_LINK_STATUS_PROPERTY]: "Completed",
       pipeline: HUBSPOT_TICKETING_PIPELINE_ID,
       dealstage: HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID,
+      [HUBSPOT_DEAL_SALE_DATE_PROPERTY]: formatHubSpotDate(new Date()),
     };
 
+    const paymentType = resolvePaymentType(data);
+    if (paymentType) {
+      dealProps[HUBSPOT_DEAL_PAYMENT_TYPE_PROPERTY] = paymentType;
+    }
+
+    const startTravelDate = parseStartTravelDateFromDealName(dealName);
+    if (startTravelDate) {
+      dealProps[HUBSPOT_DEAL_START_TRAVEL_DATE_PROPERTY] = startTravelDate;
+    }
+
+    // Deal collaborator (`hs_all_collaborator_owner_ids`) — disabled until mapping is confirmed.
+    // try {
+    //   const collaboratorIds = await resolveCollaboratorOwnerIds(dealId, token);
+    //   if (collaboratorIds) {
+    //     dealProps[HUBSPOT_DEAL_COLLABORATOR_PROPERTY] = collaboratorIds;
+    //   }
+    // } catch (error) {
+    //   console.warn(
+    //     `[submitFormPDF] Collaborator assignment skipped:`,
+    //     error instanceof Error ? error.message : error,
+    //   );
+    // }
+
     console.log(
-      `[submitFormPDF] Updating deal ${dealId} → pipeline ${HUBSPOT_TICKETING_PIPELINE_ID}, stage ${HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID}; property "${property}"`,
+      `[submitFormPDF] Updating deal ${dealId} → pipeline ${HUBSPOT_TICKETING_PIPELINE_ID}, stage ${HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID}; property "${property}"` +
+        (paymentType ? `; payment_type=${paymentType}` : "") +
+        (startTravelDate ? `; start_travel_date=${startTravelDate}` : ""),
     );
     await patchDealProperties(dealId, dealProps, token);
     console.log(`[submitFormPDF] Deal updated successfully`);
