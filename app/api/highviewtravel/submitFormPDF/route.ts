@@ -29,7 +29,6 @@ const HUBSPOT_DEAL_START_TRAVEL_DATE_PROPERTY = "start_travel_date";
 /** Deal date — Sale Date */
 const HUBSPOT_DEAL_SALE_DATE_PROPERTY = "sale_date";
 /** Deal multi-owner — collaborators (semicolon-prepended owner IDs) */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- re-enable with collaborator block in POST
 const HUBSPOT_DEAL_COLLABORATOR_PROPERTY = "hs_all_collaborator_owner_ids";
 
 /** Sales agent email → Assist team collaborator email */
@@ -219,7 +218,6 @@ async function getDealOwnerEmail(
  * Map deal sales agent → Assist collaborator; returns HubSpot property value
  * (`;{ownerId}`) or null if no match / owner not found.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- re-enable with collaborator block in POST
 async function resolveCollaboratorOwnerIds(
   dealId: string,
   token: string,
@@ -617,18 +615,18 @@ export async function POST(request: NextRequest) {
       dealProps[HUBSPOT_DEAL_START_TRAVEL_DATE_PROPERTY] = startTravelDate;
     }
 
-    // Deal collaborator (`hs_all_collaborator_owner_ids`) — disabled until mapping is confirmed.
-    // try {
-    //   const collaboratorIds = await resolveCollaboratorOwnerIds(dealId, token);
-    //   if (collaboratorIds) {
-    //     dealProps[HUBSPOT_DEAL_COLLABORATOR_PROPERTY] = collaboratorIds;
-    //   }
-    // } catch (error) {
-    //   console.warn(
-    //     `[submitFormPDF] Collaborator assignment skipped:`,
-    //     error instanceof Error ? error.message : error,
-    //   );
-    // }
+    // Map the deal owner to their Assist team collaborator when configured.
+    try {
+      const collaboratorIds = await resolveCollaboratorOwnerIds(dealId, token);
+      if (collaboratorIds) {
+        dealProps[HUBSPOT_DEAL_COLLABORATOR_PROPERTY] = collaboratorIds;
+      }
+    } catch (error) {
+      console.warn(
+        `[submitFormPDF] Collaborator assignment skipped:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
 
     console.log(
       `[submitFormPDF] Updating deal ${dealId} → pipeline ${HUBSPOT_TICKETING_PIPELINE_ID}, stage ${HUBSPOT_FORM_RECEIVED_DEAL_STAGE_ID}; property "${property}"` +
