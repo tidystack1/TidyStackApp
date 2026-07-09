@@ -5,6 +5,7 @@ type AdminSummaryRecord = {
   gross_amount?: unknown;
   commission_rate?: unknown;
   commission_amount?: unknown;
+  adjustment?: unknown;
   lw_rate?: unknown;
   lw_amount?: unknown;
 };
@@ -67,7 +68,7 @@ function buildRepRows(records: AdminSummaryRecord[]): string {
   if (records.length === 0) {
     return `
       <tr>
-        <td colspan="6" class="empty">No records for this rep.</td>
+        <td colspan="7" class="empty">No records for this rep.</td>
       </tr>
     `;
   }
@@ -78,6 +79,7 @@ function buildRepRows(records: AdminSummaryRecord[]): string {
       const grossAmount = formatCurrency(toNumber(record.gross_amount));
       const commissionRate = formatPercent(toNumber(record.commission_rate));
       const commissionAmount = formatCurrency(toNumber(record.commission_amount));
+      const adjustment = formatCurrency(toNumber(record.adjustment));
       const lwRate = formatPercent(toNumber(record.lw_rate));
       const lwAmount = formatCurrency(toNumber(record.lw_amount));
 
@@ -86,6 +88,7 @@ function buildRepRows(records: AdminSummaryRecord[]): string {
           <td>${grossAmount}</td>
           <td>${commissionRate}</td>
           <td>${commissionAmount}</td>
+          <td>${adjustment}</td>
           <td>${lwRate}</td>
           <td>${lwAmount}</td>
           <td>${notes}</td>
@@ -130,6 +133,7 @@ function buildRepSection(rep: AdminSummaryRep): string {
             <th>Gross Amount</th>
             <th>Commission Rate</th>
             <th>Commission Amount</th>
+            <th>Adjustment</th>
             <th>LW Rate</th>
             <th>LW Amount</th>
             <th>Notes</th>

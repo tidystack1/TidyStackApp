@@ -52,6 +52,7 @@ function normalizeCommission(item: LowerWattCommissionInput): LowerWattCommissio
       asNumber(item.commissionRate) ?? asNumber(item.commission_rate),
     commissionAmount:
       asNumber(item.commissionAmount) ?? asNumber(item.commission_amount),
+    adjustment: asNumber(item.adjustment) ?? 0,
     lwRate: asNumber(item.lwRate) ?? asNumber(item.lw_rate),
     lwAmount: asNumber(item.lwAmount) ?? asNumber(item.lw_amount),
   };

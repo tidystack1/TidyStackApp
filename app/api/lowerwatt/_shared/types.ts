@@ -6,6 +6,7 @@ export type LowerWattCommission = {
   gross?: number;
   commissionRate?: number;
   commissionAmount?: number;
+  adjustment?: number;
   lwRate?: number;
   lwAmount?: number;
 };

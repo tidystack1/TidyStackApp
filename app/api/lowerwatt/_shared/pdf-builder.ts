@@ -31,11 +31,12 @@ type PdfColumn = {
 };
 
 const COLUMNS: PdfColumn[] = [
-  { key: "gross", label: "Gross", width: 72, align: "right" },
-  { key: "commissionRate", label: "Rate", width: 52, align: "right" },
-  { key: "commissionAmount", label: "Commission", width: 84, align: "right" },
-  { key: "lwAmount", label: "LW Amount", width: 78, align: "right" },
-  { key: "notes", label: "Notes", width: 180, align: "left" },
+  { key: "gross", label: "Gross", width: 68, align: "right" },
+  { key: "commissionRate", label: "Rate", width: 48, align: "right" },
+  { key: "commissionAmount", label: "Commission", width: 78, align: "right" },
+  { key: "adjustment", label: "Adjustment", width: 72, align: "right" },
+  { key: "lwAmount", label: "LW Amount", width: 72, align: "right" },
+  { key: "notes", label: "Notes", width: 150, align: "left" },
 ];
 
 const TABLE_FONT_SIZE = 9;
@@ -110,6 +111,8 @@ function getCellValue(item: LowerWattCommission, column: PdfColumn): string {
       return formatPercent(Number(item.commissionRate ?? 0));
     case "commissionAmount":
       return formatCurrency(Number(item.commissionAmount ?? 0));
+    case "adjustment":
+      return formatCurrency(Number(item.adjustment ?? 0));
     case "lwAmount":
       return formatCurrency(Number(item.lwAmount ?? 0));
     default:
