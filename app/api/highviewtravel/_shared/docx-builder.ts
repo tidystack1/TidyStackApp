@@ -185,11 +185,20 @@ function fieldRow(label: string, value: string): TableRow {
   });
 }
 
-function fieldTable(rows: { label: string; value: string }[]): Table {
+function fieldTable(rows: { label: string; value: string }[]): Table | null {
+  if (rows.length === 0) return null;
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: rows.map((r) => fieldRow(r.label, r.value)),
   });
+}
+
+function pushFieldTable(
+  children: (Paragraph | Table)[],
+  rows: { label: string; value: string }[],
+): void {
+  const table = fieldTable(rows);
+  if (table) children.push(table);
 }
 
 /** Formstack-style submission DOCX (gray cells, dotted borders) for HubSpot `form_result_word_doc`. */
@@ -277,7 +286,7 @@ export async function buildFormstackDefaultDataStyleDocx(
   }
 
   children.push(sectionParagraph("AGENT INFO"));
-  children.push(fieldTable(agentRows));
+  pushFieldTable(children, agentRows);
 
   children.push(sectionParagraph("PAYMENT INFO"));
   const paymentRows: { label: string; value: string }[] = [
@@ -296,7 +305,7 @@ export async function buildFormstackDefaultDataStyleDocx(
       });
     }
   }
-  children.push(fieldTable(paymentRows));
+  pushFieldTable(children, paymentRows);
 
   for (let i = 1; i <= numPassengers; i++) {
     children.push(sectionParagraph(`PASSENGER ${i} INFO`));
@@ -313,9 +322,7 @@ export async function buildFormstackDefaultDataStyleDocx(
     if (kt) passengerRows.push({ label: "Known Traveler #", value: kt });
     if (airline) passengerRows.push({ label: "Airline", value: airline });
     if (special) passengerRows.push({ label: "Special Requests", value: special });
-    if (passengerRows.length > 0) {
-      children.push(fieldTable(passengerRows));
-    }
+    pushFieldTable(children, passengerRows);
   }
 
   const reservationRows: { label: string; value: string }[] = [];
@@ -330,9 +337,7 @@ export async function buildFormstackDefaultDataStyleDocx(
     reservationRows.push({ label: "Penalties", value: penalties });
 
   children.push(sectionParagraph("RESERVATION INFO"));
-  if (reservationRows.length > 0) {
-    children.push(fieldTable(reservationRows));
-  }
+  pushFieldTable(children, reservationRows);
 
   const fareRows: { label: string; value: string }[] = [];
   const ratePerPerson = str(data, "RATE PER PERSON");
@@ -380,7 +385,7 @@ export async function buildFormstackDefaultDataStyleDocx(
     });
 
   children.push(sectionParagraph("FARE BREAKDOWN"));
-  children.push(fieldTable(fareRows));
+  pushFieldTable(children, fareRows);
 
   const doc = new Document({
     sections: [{ children }],
