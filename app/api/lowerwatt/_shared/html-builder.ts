@@ -26,9 +26,9 @@ function buildCommissionRowsHtml(
       return `
         <tr>
           <td>${gross}</td>
+          <td>${adjustment}</td>
           <td>${commissionRate}</td>
           <td>${commissionAmount}</td>
-          <td>${adjustment}</td>
           <td>${lwAmount}</td>
           <td>${notes}</td>
         </tr>
@@ -53,9 +53,9 @@ function buildCommissionSectionHtml(params: {
         <thead>
           <tr>
             <th>Gross</th>
+            <th>Adjustment</th>
             <th>Commission Rate</th>
             <th>Commission Amount</th>
-            <th>Adjustment</th>
             <th>LW Amount</th>
             <th>Notes</th>
           </tr>

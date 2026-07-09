@@ -86,9 +86,9 @@ function buildRepRows(records: AdminSummaryRecord[]): string {
       return `
         <tr>
           <td>${grossAmount}</td>
+          <td>${adjustment}</td>
           <td>${commissionRate}</td>
           <td>${commissionAmount}</td>
-          <td>${adjustment}</td>
           <td>${lwRate}</td>
           <td>${lwAmount}</td>
           <td>${notes}</td>
@@ -131,9 +131,9 @@ function buildRepSection(rep: AdminSummaryRep): string {
         <thead>
           <tr>
             <th>Gross Amount</th>
+            <th>Adjustment</th>
             <th>Commission Rate</th>
             <th>Commission Amount</th>
-            <th>Adjustment</th>
             <th>LW Rate</th>
             <th>LW Amount</th>
             <th>Notes</th>

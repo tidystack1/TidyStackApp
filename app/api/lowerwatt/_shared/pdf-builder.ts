@@ -32,9 +32,9 @@ type PdfColumn = {
 
 const COLUMNS: PdfColumn[] = [
   { key: "gross", label: "Gross", width: 68, align: "right" },
+  { key: "adjustment", label: "Adjustment", width: 72, align: "right" },
   { key: "commissionRate", label: "Rate", width: 48, align: "right" },
   { key: "commissionAmount", label: "Commission", width: 78, align: "right" },
-  { key: "adjustment", label: "Adjustment", width: 72, align: "right" },
   { key: "lwAmount", label: "LW Amount", width: 72, align: "right" },
   { key: "notes", label: "Notes", width: 150, align: "left" },
 ];
