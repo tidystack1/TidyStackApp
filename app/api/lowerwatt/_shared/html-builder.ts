@@ -9,7 +9,7 @@ function buildCommissionRowsHtml(
   if (commissions.length === 0) {
     return `
       <tr>
-        <td colspan="6" style="text-align:center; color:#64748b;">${escapeHtml(emptyMessage)}</td>
+        <td colspan="7" style="text-align:center; color:#64748b;">${escapeHtml(emptyMessage)}</td>
       </tr>
     `;
   }
@@ -20,6 +20,7 @@ function buildCommissionRowsHtml(
       const gross = formatCurrency(Number(item.gross ?? 0));
       const commissionRate = formatPercent(Number(item.commissionRate ?? 0));
       const commissionAmount = formatCurrency(Number(item.commissionAmount ?? 0));
+      const commissionTotal = formatCurrency(Number(item.commissionTotal ?? 0));
       const adjustment = formatCurrency(Number(item.adjustment ?? 0));
       const lwAmount = formatCurrency(Number(item.lwAmount ?? 0));
 
@@ -29,6 +30,7 @@ function buildCommissionRowsHtml(
           <td>${adjustment}</td>
           <td>${commissionRate}</td>
           <td>${commissionAmount}</td>
+          <td>${commissionTotal}</td>
           <td>${lwAmount}</td>
           <td>${notes}</td>
         </tr>
@@ -56,6 +58,7 @@ function buildCommissionSectionHtml(params: {
             <th>Adjustment</th>
             <th>Commission Rate</th>
             <th>Commission Amount</th>
+            <th>Commission Total</th>
             <th>LW Amount</th>
             <th>Notes</th>
           </tr>

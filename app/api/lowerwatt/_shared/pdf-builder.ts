@@ -31,12 +31,13 @@ type PdfColumn = {
 };
 
 const COLUMNS: PdfColumn[] = [
-  { key: "gross", label: "Gross", width: 68, align: "right" },
-  { key: "adjustment", label: "Adjustment", width: 72, align: "right" },
-  { key: "commissionRate", label: "Rate", width: 48, align: "right" },
-  { key: "commissionAmount", label: "Commission", width: 78, align: "right" },
-  { key: "lwAmount", label: "LW Amount", width: 72, align: "right" },
-  { key: "notes", label: "Notes", width: 150, align: "left" },
+  { key: "gross", label: "Gross", width: 58, align: "right" },
+  { key: "adjustment", label: "Adjustment", width: 62, align: "right" },
+  { key: "commissionRate", label: "Rate", width: 40, align: "right" },
+  { key: "commissionAmount", label: "Commission", width: 68, align: "right" },
+  { key: "commissionTotal", label: "Commission Total", width: 78, align: "right" },
+  { key: "lwAmount", label: "LW Amount", width: 62, align: "right" },
+  { key: "notes", label: "Notes", width: 148, align: "left" },
 ];
 
 const TABLE_FONT_SIZE = 9;
@@ -111,6 +112,8 @@ function getCellValue(item: LowerWattCommission, column: PdfColumn): string {
       return formatPercent(Number(item.commissionRate ?? 0));
     case "commissionAmount":
       return formatCurrency(Number(item.commissionAmount ?? 0));
+    case "commissionTotal":
+      return formatCurrency(Number(item.commissionTotal ?? 0));
     case "adjustment":
       return formatCurrency(Number(item.adjustment ?? 0));
     case "lwAmount":
