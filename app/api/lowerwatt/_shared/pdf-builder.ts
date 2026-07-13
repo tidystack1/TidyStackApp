@@ -24,28 +24,56 @@ const COLOR_PANEL_BG = rgb(248 / 255, 250 / 255, 252 / 255);
 const COLOR_TABLE_HEADER_BG = rgb(241 / 255, 245 / 255, 249 / 255);
 
 type PdfColumn = {
-  key: keyof LowerWattCommission | "notes";
+  key: keyof LowerWattCommission;
   label: string;
   width: number;
   align: "left" | "right";
 };
 
-const COLUMNS: PdfColumn[] = [
-  { key: "gross", label: "Gross", width: 58, align: "right" },
-  { key: "commissionAmount", label: "Commission", width: 68, align: "right" },
-  { key: "adjustment", label: "Adjustment", width: 74, align: "right" },
-  { key: "commissionTotal", label: "Commission Total", width: 90, align: "right" },
-  { key: "commissionRate", label: "Rate", width: 40, align: "right" },
-  { key: "lwAmount", label: "LW Amount", width: 62, align: "right" },
-  { key: "notes", label: "Notes", width: 124, align: "left" },
+const COLUMNS_WITH_ADJUSTMENT: PdfColumn[] = [
+  { key: "gross", label: "Gross", width: 90, align: "right" },
+  { key: "commissionAmount", label: "Commission", width: 106, align: "right" },
+  { key: "adjustment", label: "Adjustment", width: 116, align: "right" },
+  {
+    key: "commissionTotal",
+    label: "Commission Total",
+    width: 141,
+    align: "right",
+  },
+  { key: "commissionRate", label: "Rate", width: 63, align: "right" },
+];
+
+const COLUMNS_WITHOUT_ADJUSTMENT: PdfColumn[] = [
+  { key: "gross", label: "Gross", width: 116, align: "right" },
+  { key: "commissionAmount", label: "Commission", width: 137, align: "right" },
+  {
+    key: "commissionTotal",
+    label: "Commission Total",
+    width: 182,
+    align: "right",
+  },
+  { key: "commissionRate", label: "Rate", width: 81, align: "right" },
 ];
 
 const TABLE_FONT_SIZE = 9;
 const TABLE_LINE_HEIGHT = TABLE_FONT_SIZE + 3;
 const CELL_PADDING_X = 6;
 const CELL_PADDING_Y = 6;
-const TABLE_WIDTH = COLUMNS.reduce((sum, column) => sum + column.width, 0);
 const HEADER_ROW_HEIGHT = 28;
+
+function hasAdjustments(commissions: LowerWattCommission[]): boolean {
+  return commissions.some((item) => Number(item.adjustment ?? 0) !== 0);
+}
+
+function getColumns(commissions: LowerWattCommission[]): PdfColumn[] {
+  return hasAdjustments(commissions)
+    ? COLUMNS_WITH_ADJUSTMENT
+    : COLUMNS_WITHOUT_ADJUSTMENT;
+}
+
+function getTableWidth(columns: PdfColumn[]): number {
+  return columns.reduce((sum, column) => sum + column.width, 0);
+}
 
 type PdfContext = {
   pdfDoc: PDFDocument;
@@ -87,7 +115,10 @@ function wrapTextToWidth(params: {
 
   if (lines.length === 0) return [""];
 
-  if (lines.length === maxLines && words.join(" ").length > lines.join(" ").length) {
+  if (
+    lines.length === maxLines &&
+    words.join(" ").length > lines.join(" ").length
+  ) {
     const last = lines[maxLines - 1] ?? "";
     let trimmed = last;
     while (
@@ -104,8 +135,6 @@ function wrapTextToWidth(params: {
 
 function getCellValue(item: LowerWattCommission, column: PdfColumn): string {
   switch (column.key) {
-    case "notes":
-      return item.notes?.trim() || item.description?.trim() || "N/A";
     case "gross":
       return formatCurrency(Number(item.gross ?? 0));
     case "commissionRate":
@@ -116,8 +145,6 @@ function getCellValue(item: LowerWattCommission, column: PdfColumn): string {
       return formatCurrency(Number(item.commissionTotal ?? 0));
     case "adjustment":
       return formatCurrency(Number(item.adjustment ?? 0));
-    case "lwAmount":
-      return formatCurrency(Number(item.lwAmount ?? 0));
     default:
       return "";
   }
@@ -164,7 +191,11 @@ function drawMetaLine(params: {
   });
 }
 
-function ensureSpace(ctx: PdfContext, height: number, redrawTableHeader?: () => void) {
+function ensureSpace(
+  ctx: PdfContext,
+  height: number,
+  redrawTableHeader?: () => void,
+) {
   if (ctx.y - height >= MARGIN) return;
 
   ctx.page = ctx.pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
@@ -172,11 +203,12 @@ function ensureSpace(ctx: PdfContext, height: number, redrawTableHeader?: () => 
   redrawTableHeader?.();
 }
 
-function drawTableHeader(ctx: PdfContext) {
+function drawTableHeader(ctx: PdfContext, columns: PdfColumn[]) {
+  const tableWidth = getTableWidth(columns);
   ctx.page.drawRectangle({
     x: MARGIN,
     y: ctx.y - HEADER_ROW_HEIGHT,
-    width: TABLE_WIDTH,
+    width: tableWidth,
     height: HEADER_ROW_HEIGHT,
     color: COLOR_TABLE_HEADER_BG,
     borderColor: COLOR_BORDER,
@@ -184,13 +216,16 @@ function drawTableHeader(ctx: PdfContext) {
   });
 
   let x = MARGIN;
-  for (const column of COLUMNS) {
+  for (const column of columns) {
     const textX =
       column.align === "right"
         ? x +
           column.width -
           CELL_PADDING_X -
-          ctx.bold.widthOfTextAtSize(sanitizePdfText(column.label), TABLE_FONT_SIZE)
+          ctx.bold.widthOfTextAtSize(
+            sanitizePdfText(column.label),
+            TABLE_FONT_SIZE,
+          )
         : x + CELL_PADDING_X;
     ctx.page.drawText(sanitizePdfText(column.label), {
       x: textX,
@@ -204,20 +239,25 @@ function drawTableHeader(ctx: PdfContext) {
   ctx.y -= HEADER_ROW_HEIGHT;
 }
 
-function drawCommissionTable(ctx: PdfContext, params: {
-  commissions: LowerWattCommission[];
-  emptyMessage: string;
-}) {
+function drawCommissionTable(
+  ctx: PdfContext,
+  params: {
+    commissions: LowerWattCommission[];
+    emptyMessage: string;
+  },
+) {
   const { commissions, emptyMessage } = params;
-  const redrawHeader = () => drawTableHeader(ctx);
-  drawTableHeader(ctx);
+  const columns = getColumns(commissions);
+  const tableWidth = getTableWidth(columns);
+  const redrawHeader = () => drawTableHeader(ctx, columns);
+  drawTableHeader(ctx, columns);
 
   if (commissions.length === 0) {
     const emptyLines = wrapTextToWidth({
       text: emptyMessage,
       font: ctx.font,
       fontSize: TABLE_FONT_SIZE,
-      maxWidth: TABLE_WIDTH - CELL_PADDING_X * 2,
+      maxWidth: tableWidth - CELL_PADDING_X * 2,
       maxLines: 2,
     });
     const rowHeight =
@@ -228,7 +268,7 @@ function drawCommissionTable(ctx: PdfContext, params: {
     ctx.page.drawRectangle({
       x: MARGIN,
       y: ctx.y - rowHeight,
-      width: TABLE_WIDTH,
+      width: tableWidth,
       height: rowHeight,
       borderColor: COLOR_BORDER,
       borderWidth: 1,
@@ -238,7 +278,7 @@ function drawCommissionTable(ctx: PdfContext, params: {
     for (const line of emptyLines) {
       const text = sanitizePdfText(line);
       const textWidth = ctx.font.widthOfTextAtSize(text, TABLE_FONT_SIZE);
-      const textX = MARGIN + (TABLE_WIDTH - textWidth) / 2;
+      const textX = MARGIN + (tableWidth - textWidth) / 2;
       ctx.page.drawText(text, {
         x: textX,
         y: lineY,
@@ -254,7 +294,7 @@ function drawCommissionTable(ctx: PdfContext, params: {
   }
 
   for (const item of commissions) {
-    const cellLines = COLUMNS.map((column) =>
+    const cellLines = columns.map((column) =>
       wrapTextToWidth({
         text: getCellValue(item, column),
         font: ctx.font,
@@ -265,7 +305,8 @@ function drawCommissionTable(ctx: PdfContext, params: {
     );
 
     const rowHeight =
-      Math.max(...cellLines.map((lines) => lines.length), 1) * TABLE_LINE_HEIGHT +
+      Math.max(...cellLines.map((lines) => lines.length), 1) *
+        TABLE_LINE_HEIGHT +
       CELL_PADDING_Y * 2;
 
     ensureSpace(ctx, rowHeight, redrawHeader);
@@ -273,15 +314,15 @@ function drawCommissionTable(ctx: PdfContext, params: {
     ctx.page.drawRectangle({
       x: MARGIN,
       y: ctx.y - rowHeight,
-      width: TABLE_WIDTH,
+      width: tableWidth,
       height: rowHeight,
       borderColor: COLOR_BORDER,
       borderWidth: 1,
     });
 
     let x = MARGIN;
-    for (let i = 0; i < COLUMNS.length; i++) {
-      const column = COLUMNS[i]!;
+    for (let i = 0; i < columns.length; i++) {
+      const column = columns[i]!;
       const lines = cellLines[i] ?? [""];
       let lineY = ctx.y - CELL_PADDING_Y - TABLE_FONT_SIZE;
       for (const line of lines) {
@@ -309,14 +350,16 @@ function drawCommissionTable(ctx: PdfContext, params: {
   }
 }
 
-function drawCommissionSection(ctx: PdfContext, params: {
-  sectionTitle: string;
-  commissions: LowerWattCommission[];
-  emptyMessage: string;
-  totalCommission: number;
-  totalLW: number;
-}) {
-  const { sectionTitle, commissions, emptyMessage, totalCommission, totalLW } = params;
+function drawCommissionSection(
+  ctx: PdfContext,
+  params: {
+    sectionTitle: string;
+    commissions: LowerWattCommission[];
+    emptyMessage: string;
+    totalCommission: number;
+  },
+) {
+  const { sectionTitle, commissions, emptyMessage, totalCommission } = params;
 
   ensureSpace(ctx, 90);
   ctx.y -= 8;
@@ -332,7 +375,7 @@ function drawCommissionSection(ctx: PdfContext, params: {
   drawCommissionTable(ctx, { commissions, emptyMessage });
 
   ctx.y -= 12;
-  const totalsHeight = 52;
+  const totalsHeight = 34;
   ensureSpace(ctx, totalsHeight);
   drawPanel({
     page: ctx.page,
@@ -350,19 +393,12 @@ function drawCommissionSection(ctx: PdfContext, params: {
     label: "Total Commissions",
     value: formatCurrency(totalCommission),
   });
-  drawMetaLine({
-    page: ctx.page,
-    font: ctx.font,
-    bold: ctx.bold,
-    x: MARGIN + 14,
-    y: ctx.y - 40,
-    label: "Total LW",
-    value: formatCurrency(totalLW),
-  });
   ctx.y -= totalsHeight + 18;
 }
 
-export function buildCommissionsPdfFilename(payload: NormalizedRepPayload): string {
+export function buildCommissionsPdfFilename(
+  payload: NormalizedRepPayload,
+): string {
   const month = payload.monthTitle
     .replace(/[^a-z0-9]+/gi, "_")
     .replace(/^_|_$/g, "")
@@ -374,7 +410,9 @@ export function buildCommissionsPdfFilename(payload: NormalizedRepPayload): stri
   return `lowerwatt_commission_${month}_${rep}.pdf`;
 }
 
-export async function buildCommissionsPdf(payload: NormalizedRepPayload): Promise<Buffer> {
+export async function buildCommissionsPdf(
+  payload: NormalizedRepPayload,
+): Promise<Buffer> {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -382,7 +420,7 @@ export async function buildCommissionsPdf(payload: NormalizedRepPayload): Promis
   const repName = payload.repName?.trim() || "Unknown Rep";
   const repEmail = payload.repEmail?.trim() || "No email provided";
 
-  let page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   let y = PAGE_HEIGHT - MARGIN;
 
   const headerHeight = 64;
@@ -400,13 +438,16 @@ export async function buildCommissionsPdf(payload: NormalizedRepPayload): Promis
     font: bold,
     color: COLOR_HEADER_TEXT,
   });
-  page.drawText(sanitizePdfText(`Monthly commission report - ${payload.monthTitle}`), {
-    x: MARGIN + 16,
-    y: y - 46,
-    size: 11,
-    font,
-    color: COLOR_HEADER_SUBTEXT,
-  });
+  page.drawText(
+    sanitizePdfText(`Monthly commission report - ${payload.monthTitle}`),
+    {
+      x: MARGIN + 16,
+      y: y - 46,
+      size: 11,
+      font,
+      color: COLOR_HEADER_SUBTEXT,
+    },
+  );
   y -= headerHeight + 18;
 
   const metaHeight = 90;
@@ -456,7 +497,6 @@ export async function buildCommissionsPdf(payload: NormalizedRepPayload): Promis
     commissions: payload.commissionThisMonth,
     emptyMessage: "No commission records for this month.",
     totalCommission: payload.totalCommissionThisMonth,
-    totalLW: payload.totalLWThisMonth,
   });
 
   drawCommissionSection(ctx, {
@@ -464,7 +504,6 @@ export async function buildCommissionsPdf(payload: NormalizedRepPayload): Promis
     commissions: payload.commissionLastMonth,
     emptyMessage: "No commission records for last month.",
     totalCommission: payload.totalCommissionLastMonth,
-    totalLW: payload.totalLWLastMonth,
   });
 
   const bytes = await pdfDoc.save();

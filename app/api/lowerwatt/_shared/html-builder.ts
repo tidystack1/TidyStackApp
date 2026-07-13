@@ -2,37 +2,40 @@ import type { LowerWattCommission } from "./types";
 import type { NormalizedRepPayload } from "./commissions";
 import { escapeHtml, formatCurrency, formatPercent } from "./format";
 
+function hasAdjustments(commissions: LowerWattCommission[]): boolean {
+  return commissions.some((item) => Number(item.adjustment ?? 0) !== 0);
+}
+
 function buildCommissionRowsHtml(
   commissions: LowerWattCommission[],
   emptyMessage: string,
+  showAdjustment: boolean,
 ): string {
+  const columnCount = showAdjustment ? 5 : 4;
+
   if (commissions.length === 0) {
     return `
       <tr>
-        <td colspan="7" style="text-align:center; color:#64748b;">${escapeHtml(emptyMessage)}</td>
+        <td colspan="${columnCount}" style="text-align:center; color:#64748b;">${escapeHtml(emptyMessage)}</td>
       </tr>
     `;
   }
 
   return commissions
     .map((item) => {
-      const notes = escapeHtml(item.notes?.trim() || item.description?.trim() || "N/A");
       const gross = formatCurrency(Number(item.gross ?? 0));
       const commissionRate = formatPercent(Number(item.commissionRate ?? 0));
       const commissionAmount = formatCurrency(Number(item.commissionAmount ?? 0));
       const commissionTotal = formatCurrency(Number(item.commissionTotal ?? 0));
       const adjustment = formatCurrency(Number(item.adjustment ?? 0));
-      const lwAmount = formatCurrency(Number(item.lwAmount ?? 0));
 
       return `
         <tr>
           <td>${gross}</td>
           <td>${commissionAmount}</td>
-          <td class="col-adjustment">${adjustment}</td>
+          ${showAdjustment ? `<td class="col-adjustment">${adjustment}</td>` : ""}
           <td class="col-commission-total">${commissionTotal}</td>
           <td>${commissionRate}</td>
-          <td>${lwAmount}</td>
-          <td>${notes}</td>
         </tr>
       `;
     })
@@ -44,9 +47,9 @@ function buildCommissionSectionHtml(params: {
   commissions: LowerWattCommission[];
   emptyMessage: string;
   totalCommission: number;
-  totalLW: number;
 }): string {
-  const { sectionTitle, commissions, emptyMessage, totalCommission, totalLW } = params;
+  const { sectionTitle, commissions, emptyMessage, totalCommission } = params;
+  const showAdjustment = hasAdjustments(commissions);
 
   return `
     <section class="commission-section">
@@ -56,20 +59,17 @@ function buildCommissionSectionHtml(params: {
           <tr>
             <th>Gross</th>
             <th>Commission Amount</th>
-            <th class="col-adjustment">Adjustment</th>
+            ${showAdjustment ? `<th class="col-adjustment">Adjustment</th>` : ""}
             <th class="col-commission-total">Commission Total</th>
             <th>Commission Rate</th>
-            <th>LW Amount</th>
-            <th>Notes</th>
           </tr>
         </thead>
         <tbody>
-          ${buildCommissionRowsHtml(commissions, emptyMessage)}
+          ${buildCommissionRowsHtml(commissions, emptyMessage, showAdjustment)}
         </tbody>
       </table>
       <div class="totals">
         <p><strong>Total Commissions:</strong> ${formatCurrency(totalCommission)}</p>
-        <p><strong>Total LW:</strong> ${formatCurrency(totalLW)}</p>
       </div>
     </section>
   `;
@@ -86,7 +86,6 @@ export function buildCommissionsHtml(payload: NormalizedRepPayload): string {
     commissions: payload.commissionThisMonth,
     emptyMessage: "No commission records for this month.",
     totalCommission: payload.totalCommissionThisMonth,
-    totalLW: payload.totalLWThisMonth,
   });
 
   const lastMonthSection = buildCommissionSectionHtml({
@@ -94,7 +93,6 @@ export function buildCommissionsHtml(payload: NormalizedRepPayload): string {
     commissions: payload.commissionLastMonth,
     emptyMessage: "No commission records for last month.",
     totalCommission: payload.totalCommissionLastMonth,
-    totalLW: payload.totalLWLastMonth,
   });
 
   return `
