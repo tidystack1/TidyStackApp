@@ -6,15 +6,11 @@ type AdminSummaryRecord = {
   commissionAmount?: unknown;
   lw_amount?: unknown;
   lwAmount?: unknown;
-  month?: unknown;
-  monthTitle?: unknown;
 };
 
 type AdminSummaryRep = {
   rep_name?: unknown;
   repName?: unknown;
-  month?: unknown;
-  monthTitle?: unknown;
   commissionThisMonth?: unknown;
 };
 
@@ -42,32 +38,16 @@ function asString(value: unknown, fallback = ""): string {
   return fallback;
 }
 
-function resolveMonth(
-  payload: Record<string, unknown> | null,
-  rep: AdminSummaryRep,
-  record: AdminSummaryRecord,
-): string {
-  return asString(
-    record.monthTitle ??
-      record.month ??
-      rep.monthTitle ??
-      rep.month ??
-      payload?.monthTitle ??
-      payload?.month,
-    "N/A",
-  );
-}
-
-function resolveReps(payload: unknown): {
+function resolvePayload(payload: unknown): {
   reps: AdminSummaryRep[];
-  root: Record<string, unknown> | null;
+  monthLabel: string;
 } {
   if (Array.isArray(payload)) {
-    return { reps: payload as AdminSummaryRep[], root: null };
+    return { reps: payload as AdminSummaryRep[], monthLabel: "N/A" };
   }
 
   if (!payload || typeof payload !== "object") {
-    return { reps: [], root: null };
+    return { reps: [], monthLabel: "N/A" };
   }
 
   const candidate = payload as Record<string, unknown>;
@@ -81,15 +61,13 @@ function resolveReps(payload: unknown): {
 
   return {
     reps: Array.isArray(reps) ? (reps as AdminSummaryRep[]) : [],
-    root: candidate,
+    monthLabel: asString(candidate.month_label, "N/A"),
   };
 }
 
-function buildSummaryRows(
-  reps: AdminSummaryRep[],
-  root: Record<string, unknown> | null,
-): string {
+function buildSummaryRows(reps: AdminSummaryRep[], monthLabel: string): string {
   const rows: string[] = [];
+  const month = escapeHtml(monthLabel);
 
   for (const rep of reps) {
     const repName = escapeHtml(asString(rep.rep_name ?? rep.repName, "Unknown Rep"));
@@ -105,7 +83,6 @@ function buildSummaryRows(
         toNumber(record.lw_amount ?? record.lwAmount),
       );
       const notes = escapeHtml(asString(record.notes, "N/A"));
-      const month = escapeHtml(resolveMonth(root, rep, record));
 
       rows.push(`
         <tr>
@@ -132,7 +109,7 @@ function buildSummaryRows(
 
 function buildAdminSummaryHtml(
   reps: AdminSummaryRep[],
-  root: Record<string, unknown> | null,
+  monthLabel: string,
 ): string {
   return `
 <!doctype html>
@@ -217,7 +194,7 @@ function buildAdminSummaryHtml(
               </tr>
             </thead>
             <tbody>
-              ${buildSummaryRows(reps, root)}
+              ${buildSummaryRows(reps, monthLabel)}
             </tbody>
           </table>
         </div>
@@ -231,8 +208,8 @@ function buildAdminSummaryHtml(
 export async function POST(request: Request): Promise<Response> {
   try {
     const payload = (await request.json()) as unknown;
-    const { reps, root } = resolveReps(payload);
-    const html = buildAdminSummaryHtml(reps, root);
+    const { reps, monthLabel } = resolvePayload(payload);
+    const html = buildAdminSummaryHtml(reps, monthLabel);
 
     return Response.json({
       company: "LowerWatt",
