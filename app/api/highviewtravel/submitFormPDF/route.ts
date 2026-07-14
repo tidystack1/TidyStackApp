@@ -121,7 +121,8 @@ function resolvePaymentType(data: FormData): string | null {
   }
   if (
     formType === "Commission off Published Rate" ||
-    formType === "Net Rate (NO CC Fee)"
+    formType === "Net Rate (NO CC Fee)" ||
+    formType === "Published Rate + $75 Ticketing Fee"
   ) {
     return "On PAX CC";
   }
