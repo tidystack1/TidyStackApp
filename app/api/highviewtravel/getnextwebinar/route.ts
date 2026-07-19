@@ -15,9 +15,9 @@ export async function OPTIONS() {
   });
 }
 
-/** Zoom webinar list item (from /users/me/webinars) */
-interface ZoomWebinar {
-  id: string;
+/** Zoom meeting list item (from /users/me/meetings) */
+interface ZoomMeeting {
+  id: string | number;
   start_time: string;
   join_url?: string;
   topic?: string;
@@ -53,11 +53,11 @@ async function getZoomAccessToken(): Promise<string> {
 }
 
 /**
- * Fetch upcoming webinars
+ * Fetch upcoming meetings
  */
-async function getUpcomingWebinars(token: string) {
+async function getUpcomingMeetings(token: string) {
   const res = await fetch(
-    "https://api.zoom.us/v2/users/me/webinars?type=upcoming&page_size=100",
+    "https://api.zoom.us/v2/users/me/meetings?type=upcoming&page_size=100",
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -66,25 +66,25 @@ async function getUpcomingWebinars(token: string) {
   );
 
   if (!res.ok) {
-    throw new Error("Failed to fetch webinars");
+    throw new Error("Failed to fetch meetings");
   }
 
   const data = await res.json();
-  return data.webinars ?? [];
+  return data.meetings ?? [];
 }
 
 /**
- * Fetch full webinar details (to get registration_url)
+ * Fetch full meeting details (to get registration_url)
  */
-async function getWebinarDetails(token: string, webinarId: string) {
-  const res = await fetch(`https://api.zoom.us/v2/webinars/${webinarId}`, {
+async function getMeetingDetails(token: string, meetingId: string | number) {
+  const res = await fetch(`https://api.zoom.us/v2/meetings/${meetingId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
   });
 
   if (!res.ok) {
-    throw new Error("Failed to fetch webinar details");
+    throw new Error("Failed to fetch meeting details");
   }
 
   return await res.json();
@@ -127,7 +127,8 @@ function toNYDateString(d: Date): string {
 }
 
 /**
- * POST handler
+ * POST handler — endpoint + response shape unchanged for automations.
+ * Internally uses Zoom Meetings instead of Webinars.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -139,12 +140,12 @@ export async function POST(req: NextRequest) {
     }
 
     const token = await getZoomAccessToken();
-    const webinars = await getUpcomingWebinars(token);
+    const meetings = await getUpcomingMeetings(token);
 
     const now = new Date();
 
-    const upcoming = (webinars as ZoomWebinar[])
-      .filter((w) => new Date(w.start_time) > now)
+    const upcoming = (meetings as ZoomMeeting[])
+      .filter((m) => new Date(m.start_time) > now)
       .sort(
         (a, b) =>
           new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
@@ -168,7 +169,7 @@ export async function POST(req: NextRequest) {
     const next = upcoming[0];
     const startDateObj = new Date(next.start_time);
 
-    const webinarDetails = await getWebinarDetails(token, next.id);
+    const meetingDetails = await getMeetingDetails(token, next.id);
 
     const tomorrow = new Date(now);
     tomorrow.setTime(now.getTime() + 24 * 60 * 60 * 1000);
@@ -184,7 +185,7 @@ export async function POST(req: NextRequest) {
         year: "numeric",
       }),
       join_url: next.join_url || null,
-      registration_url: webinarDetails.registration_url || null,
+      registration_url: meetingDetails.registration_url || null,
       topic: next.topic || null,
       webinar_id: next.id,
       is_today: toNYDateString(startDateObj) === toNYDateString(now) ? 1 : 0,
