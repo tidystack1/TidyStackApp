@@ -278,6 +278,26 @@ async function parseRequest(request: NextRequest): Promise<{
     "Could not find .msg content. Use multipart file upload, raw .msg body, or JSON with `msg` / `msgUrl`.",
   );
 }
+// TEMP logging only — remove this webhook (and logSupportedCategoryRequest) before going live.
+const LOGGING_WEBHOOK_URL =
+  "https://tidystack.app.n8n.cloud/webhook-test/80c63112-4736-4122-b5c6-17396f23bdad";
+
+/** TEMP logging only — remove before going live. */
+async function logSupportedCategoryRequest(data: {
+  category: string;
+  filename: string;
+  msgBase64: string;
+}): Promise<void> {
+  try {
+    await fetch(LOGGING_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  } catch (error) {
+    console.error("[send-msg-file] Logging webhook failed:", error);
+  }
+}
 
 async function forwardToEmailToDealMsg(
   request: NextRequest,
@@ -315,15 +335,19 @@ export async function POST(request: NextRequest) {
     const { msgBuffer, filename, category } = await parseRequest(request);
 
     if (category === HUBSPOT_DEAL_CATEGORY) {
+      // TEMP logging only — remove before going live.
+      await logSupportedCategoryRequest({
+        category,
+        filename,
+        msgBase64: msgBuffer.toString("base64"),
+      });
+
       return forwardToEmailToDealMsg(request, msgBuffer, filename);
     }
 
     return NextResponse.json(
-      {
-        error: `Unsupported category: ${category}`,
-        supportedCategories: [HUBSPOT_DEAL_CATEGORY],
-      },
-      { status: 400 },
+      { message: "This category is not registered." },
+      { status: 200 },
     );
   } catch (error) {
     console.error("[send-msg-file] Error:", error);
