@@ -280,7 +280,7 @@ async function parseRequest(request: NextRequest): Promise<{
 }
 // TEMP logging only — remove this webhook (and logSupportedCategoryRequest) before going live.
 const LOGGING_WEBHOOK_URL =
-  "https://tidystack.app.n8n.cloud/webhook-test/80c63112-4736-4122-b5c6-17396f23bdad";
+  "https://tidystack.app.n8n.cloud/webhook/80c63112-4736-4122-b5c6-17396f23bdad";
 
 /** TEMP logging only — remove before going live. */
 async function logSupportedCategoryRequest(data: {
