@@ -1,11 +1,8 @@
-import { GoogleGenAI } from "@google/genai";
+import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
-
-const WEBHOOK_URL =
-  "https://webhook.site/4f0398b1-660a-4f63-82d2-7126cf2da906";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -100,6 +97,18 @@ Rules:
 - notes: short strings about fallbacks, multi-meter, missing city, credit balances, etc.
 
 Currency amounts must be numbers (not strings). Dates preferably YYYY-MM-DD.`;
+
+function parseJsonFromModel(text: string): unknown {
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("Model did not return valid JSON");
+    return JSON.parse(match[0]);
+  }
+}
+
 async function readPdfFromRequest(
   request: NextRequest,
 ): Promise<{ bytes: Buffer; filename: string }> {
@@ -144,23 +153,12 @@ async function readPdfFromRequest(
   };
 }
 
-function parseJsonFromModel(text: string): unknown {
-  const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const match = trimmed.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("Model did not return valid JSON");
-    return JSON.parse(match[0]);
-  }
-}
-
 export async function POST(request: NextRequest): Promise<Response> {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.CLAUDE_API_KEY;
     if (!apiKey) {
       return jsonWithCors(
-        { error: "GEMINI_API_KEY is not configured" },
+        { error: "CLAUDE_API_KEY is not configured" },
         { status: 500 },
       );
     }
@@ -174,105 +172,48 @@ export async function POST(request: NextRequest): Promise<Response> {
       );
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const client = new Anthropic({ apiKey });
+    const model = "claude-opus-4-8";
 
-    // Prefer flash; fall back when free-tier capacity/quota spikes (503/429).
-    const models = [
-      "gemini-3-flash-preview",
-      "gemini-flash-lite-latest",
-      "gemini-flash-latest",
-    ];
-
-    const contents = [
-      {
-        role: "user" as const,
-        parts: [
-          { text: EXTRACTION_PROMPT },
-          {
-            inlineData: {
-              mimeType: "application/pdf",
-              data: bytes.toString("base64"),
+    const response = await client.messages.create({
+      model,
+      max_tokens: 4096,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: bytes.toString("base64"),
+              },
             },
-          },
-        ],
-      },
-    ];
+            { type: "text", text: EXTRACTION_PROMPT },
+          ],
+        },
+      ],
+    });
 
-    let rawText = "";
-    let usedModel = models[0];
-    let lastError: unknown;
+    const textBlock = response.content.find(
+      (block): block is Anthropic.TextBlock => block.type === "text",
+    );
 
-    for (const model of models) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents,
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.1,
-          },
-        });
-        rawText = response.text ?? "";
-        if (rawText) {
-          usedModel = model;
-          break;
-        }
-        lastError = new Error(`Empty response from ${model}`);
-      } catch (error) {
-        lastError = error;
-        const message =
-          error instanceof Error ? error.message : String(error);
-        const retryable =
-          message.includes('"code":503') ||
-          message.includes('"code":429') ||
-          message.includes("UNAVAILABLE") ||
-          message.includes("RESOURCE_EXHAUSTED") ||
-          message.includes("high demand");
-        if (!retryable) throw error;
-        console.warn(
-          `[bill-extraction-into-smartsuite] ${model} failed, trying next:`,
-          message.slice(0, 180),
-        );
-      }
-    }
-
-    if (!rawText) {
-      const message =
-        lastError instanceof Error
-          ? lastError.message
-          : "All Gemini models failed";
+    if (!textBlock) {
       return jsonWithCors(
-        { error: message, filename, triedModels: models },
+        { error: "Claude did not return any text content", filename },
         { status: 502 },
       );
     }
 
-    const extracted = parseJsonFromModel(rawText);
-
-    const webhookPayload = {
-      source: "lowerwatt/bill-extraction-into-smartsuite",
-      filename,
-      model: usedModel,
-      extractedAt: new Date().toISOString(),
-      extracted,
-    };
-
-    const webhookRes = await fetch(WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(webhookPayload),
-    });
+    const extracted = parseJsonFromModel(textBlock.text);
 
     return jsonWithCors({
       success: true,
       filename,
-      model: usedModel,
+      model,
       extracted,
-      webhook: {
-        url: WEBHOOK_URL,
-        status: webhookRes.status,
-        ok: webhookRes.ok,
-      },
     });
   } catch (error) {
     const message =
