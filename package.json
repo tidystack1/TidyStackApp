@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.112.3",
     "@google/genai": "^2.11.0",
     "@kenjiuno/msgreader": "^1.28.0",
+    "@vercel/blob": "^2.6.1",
     "docx": "^9.6.1",
     "next": "16.1.1",
     "nodemailer": "^6.9.8",
