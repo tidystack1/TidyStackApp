@@ -358,18 +358,13 @@ drawBullet("category", '"HubSpot deal"');
 drawBullet("secret", "Plugin shared secret");
 drawBullet("triggeredBy", "(Optional) User or mailbox id for logging");
 y -= 4;
-drawText("messageId is not required here — use pathname from step 1.", {
-  size: 9,
-  f: fontBold,
-  color: C.brand,
-});
-y -= 2;
 drawText("Example request:", { size: 9, f: fontBold, color: C.muted });
 drawCodeBlock([
   "{",
   '  "pathname": "msg/AAMkAG....msg",',
   '  "category": "HubSpot deal",',
-  '  "secret": "<shared-secret>"',
+  '  "secret": "<shared-secret>",',
+  '  "triggeredBy": "berel@shmerel.com"',
   "}",
 ]);
 drawText("Sample success response (HubSpot deal, HTTP 200):", {
