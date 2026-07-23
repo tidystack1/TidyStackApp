@@ -1,6 +1,10 @@
 import { issueSignedToken, presignUrl } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
 import {
+  isRegisteredCategory,
+  REGISTERED_CATEGORIES,
+} from "../_shared/categories";
+import {
   pluginUnauthorizedResponse,
   verifyPluginSharedSecret,
 } from "../_shared/verify-plugin-shared-secret";
@@ -26,6 +30,15 @@ function pathnameForMessageId(messageId: unknown): string {
   return `msg/${id}.msg`;
 }
 
+function requireCategory(category: unknown): string {
+  if (typeof category !== "string" || !category.trim()) {
+    throw new Error(
+      `Missing category. Provide JSON with category set to one of: ${REGISTERED_CATEGORIES.join(", ")}.`,
+    );
+  }
+  return category.trim();
+}
+
 export async function POST(request: NextRequest) {
   try {
     let body: Record<string, unknown>;
@@ -40,6 +53,18 @@ export async function POST(request: NextRequest) {
 
     if (!verifyPluginSharedSecret(body.secret)) {
       return pluginUnauthorizedResponse();
+    }
+
+    const category = requireCategory(body.category);
+    const registeredCategory = isRegisteredCategory(category);
+    if (!registeredCategory) {
+      return NextResponse.json(
+        {
+          message: "This category is not registered.",
+          registeredCategory: false,
+        },
+        { status: 200 },
+      );
     }
 
     const pathname = pathnameForMessageId(body.messageId);
@@ -63,7 +88,11 @@ export async function POST(request: NextRequest) {
       allowOverwrite: true,
     });
 
-    return NextResponse.json({ uploadUrl: presignedUrl, pathname });
+    return NextResponse.json({
+      uploadUrl: presignedUrl,
+      pathname,
+      registeredCategory: true,
+    });
   } catch (error) {
     console.error("[send-msg-file/get-upload-url] Error:", error);
     const message = error instanceof Error ? error.message : String(error);

@@ -1,11 +1,15 @@
-import { issueSignedToken, presignUrl } from "@vercel/blob";
+import { del, issueSignedToken, presignUrl } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  CATEGORY_HUBSPOT_DEAL,
+  isRegisteredCategory,
+  REGISTERED_CATEGORIES,
+} from "../_shared/categories";
 import {
   pluginUnauthorizedResponse,
   verifyPluginSharedSecret,
 } from "../_shared/verify-plugin-shared-secret";
 
-const HUBSPOT_DEAL_CATEGORY = "HubSpot deal";
 const EMAIL_TO_DEAL_MSG_PATH = "/api/highviewtravel/email-to-deal/msg";
 const READ_URL_TTL_MS = 10 * 60 * 1000;
 
@@ -26,9 +30,24 @@ function looksLikeMsgBuffer(buffer: Buffer): boolean {
 
 function requireCategory(category: unknown): string {
   if (typeof category !== "string" || !category.trim()) {
-    throw new Error('Missing category. Provide JSON {"category":"HubSpot deal"}.');
+    throw new Error(
+      `Missing category. Provide JSON with category set to one of: ${REGISTERED_CATEGORIES.join(", ")}.`,
+    );
   }
   return category.trim();
+}
+
+function jsonResponse(
+  payload: unknown,
+  registeredCategory: boolean,
+  status: number,
+): NextResponse {
+  const base =
+    payload !== null && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : { data: payload };
+
+  return NextResponse.json({ ...base, registeredCategory }, { status });
 }
 
 function requirePathname(pathname: unknown): string {
@@ -100,6 +119,12 @@ function filenameFromPathname(pathname: string): string {
   return base.endsWith(".msg") ? base : `${base}.msg`;
 }
 
+function optionalTriggeredBy(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 // TEMP logging only — remove this webhook (and logSupportedCategoryRequest) before going live.
 const LOGGING_WEBHOOK_URL =
   "https://tidystack.app.n8n.cloud/webhook/80c63112-4736-4122-b5c6-17396f23bdad";
@@ -109,6 +134,7 @@ async function logSupportedCategoryRequest(data: {
   category: string;
   filename: string;
   msgBase64: string;
+  triggeredBy?: string;
 }): Promise<void> {
   try {
     await fetch(LOGGING_WEBHOOK_URL, {
@@ -125,7 +151,7 @@ async function forwardToEmailToDealMsg(
   request: NextRequest,
   msgBuffer: Buffer,
   filename: string,
-): Promise<NextResponse> {
+): Promise<{ payload: unknown; status: number }> {
   const form = new FormData();
   form.append(
     "msg",
@@ -149,7 +175,21 @@ async function forwardToEmailToDealMsg(
     payload = { details: text };
   }
 
-  return NextResponse.json(payload, { status: upstream.status });
+  return { payload, status: upstream.status };
+}
+
+async function deleteUploadedMsgBlob(pathname: string): Promise<void> {
+  try {
+    await del(pathname);
+    console.info(
+      `[send-msg-file/process] Deleted .msg blob at pathname "${pathname}"`,
+    );
+  } catch (error) {
+    console.error(
+      `[send-msg-file/process] Failed to delete .msg blob at pathname "${pathname}":`,
+      error,
+    );
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -176,23 +216,49 @@ export async function POST(request: NextRequest) {
       }
     }
     const category = requireCategory(body.category);
+    const triggeredBy = optionalTriggeredBy(body.triggeredBy);
+    const registeredCategory = isRegisteredCategory(category);
+
+    if (!registeredCategory) {
+      await deleteUploadedMsgBlob(pathname);
+      return NextResponse.json(
+        {
+          message: "This category is not registered.",
+          registeredCategory: false,
+        },
+        { status: 200 },
+      );
+    }
+
     const msgBuffer = await fetchMsgFromBlob(pathname);
     const filename = filenameFromPathname(pathname);
 
-    if (category === HUBSPOT_DEAL_CATEGORY) {
+    if (category === CATEGORY_HUBSPOT_DEAL) {
       // TEMP logging only — remove before going live.
       await logSupportedCategoryRequest({
         category,
         filename,
         msgBase64: msgBuffer.toString("base64"),
+        ...(triggeredBy !== undefined ? { triggeredBy } : {}),
       });
 
-      return forwardToEmailToDealMsg(request, msgBuffer, filename);
+      const { payload, status } = await forwardToEmailToDealMsg(
+        request,
+        msgBuffer,
+        filename,
+      );
+      if (status >= 200 && status < 300) {
+        await deleteUploadedMsgBlob(pathname);
+      }
+      return jsonResponse(payload, true, status);
     }
 
     return NextResponse.json(
-      { message: "This category is not registered." },
-      { status: 200 },
+      {
+        message: "This category is registered but has no handler configured.",
+        registeredCategory: true,
+      },
+      { status: 501 },
     );
   } catch (error) {
     console.error("[send-msg-file/process] Error:", error);

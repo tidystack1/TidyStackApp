@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 
 export function verifyPluginSharedSecret(provided: unknown): boolean {
-  const expected = process.env.PLUGIN_SHARED_SECRET;
+  const expected = process.env.EMAIL_MSG_FILE_PLUGIN_SHARED_SECRET;
   if (!expected || typeof provided !== "string" || !provided.trim()) {
     return false;
   }
