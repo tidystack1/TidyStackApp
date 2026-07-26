@@ -15,7 +15,7 @@ export async function OPTIONS() {
   });
 }
 
-/** Zoom meeting list item (from /users/me/meetings) */
+/** Zoom meeting list item (from /users/{userId}/meetings) */
 interface ZoomMeeting {
   id: string | number;
   start_time: string;
@@ -23,6 +23,9 @@ interface ZoomMeeting {
   topic?: string;
   [key: string]: unknown;
 }
+
+/** webinars@highviewtravel.com */
+const ZOOM_USER_ID = "MFhnzd6tQw-lRii-mA_9hw";
 
 /**
  * Get Zoom access token (Server-to-Server OAuth)
@@ -53,11 +56,11 @@ async function getZoomAccessToken(): Promise<string> {
 }
 
 /**
- * Fetch upcoming meetings
+ * Fetch upcoming meetings for the configured Zoom user
  */
 async function getUpcomingMeetings(token: string) {
   const res = await fetch(
-    "https://api.zoom.us/v2/users/me/meetings?type=upcoming&page_size=100",
+    `https://api.zoom.us/v2/users/${ZOOM_USER_ID}/meetings?type=upcoming&page_size=100`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -66,6 +69,8 @@ async function getUpcomingMeetings(token: string) {
   );
 
   if (!res.ok) {
+    const errorBody = await res.text();
+    console.error("Zoom meetings error:", res.status, errorBody);
     throw new Error("Failed to fetch meetings");
   }
 
@@ -136,7 +141,10 @@ export async function POST(req: NextRequest) {
     const password = body.password;
 
     if (password !== process.env.HIGHVIEWTRAVEL_PASSWORD) {
-      return NextResponse.json({ error: "Invalid password" }, { status: 401, headers: corsHeaders() });
+      return NextResponse.json(
+        { error: "Invalid password" },
+        { status: 401, headers: corsHeaders() },
+      );
     }
 
     const token = await getZoomAccessToken();
@@ -152,18 +160,21 @@ export async function POST(req: NextRequest) {
       );
 
     if (upcoming.length === 0) {
-      return NextResponse.json({
-        active: false,
-        start_time: null,
-        start_time_formatted: null,
-        start_date: null,
-        join_url: null,
-        registration_url: null,
-        topic: null,
-        webinar_id: null,
-        is_today: 0,
-        is_tomorrow: 0,
-      }, { headers: corsHeaders() });
+      return NextResponse.json(
+        {
+          active: false,
+          start_time: null,
+          start_time_formatted: null,
+          start_date: null,
+          join_url: null,
+          registration_url: null,
+          topic: null,
+          webinar_id: null,
+          is_today: 0,
+          is_tomorrow: 0,
+        },
+        { headers: corsHeaders() },
+      );
     }
 
     const next = upcoming[0];
@@ -174,24 +185,27 @@ export async function POST(req: NextRequest) {
     const tomorrow = new Date(now);
     tomorrow.setTime(now.getTime() + 24 * 60 * 60 * 1000);
 
-    return NextResponse.json({
-      active: true,
-      start_time: next.start_time,
-      start_time_formatted: formatStartTime(next.start_time),
-      start_date: startDateObj.toLocaleString("en-US", {
-        timeZone: "America/New_York",
-        month: "2-digit",
-        day: "2-digit",
-        year: "numeric",
-      }),
-      join_url: next.join_url || null,
-      registration_url: meetingDetails.registration_url || null,
-      topic: next.topic || null,
-      webinar_id: next.id,
-      is_today: toNYDateString(startDateObj) === toNYDateString(now) ? 1 : 0,
-      is_tomorrow:
-        toNYDateString(startDateObj) === toNYDateString(tomorrow) ? 1 : 0,
-    }, { headers: corsHeaders() });
+    return NextResponse.json(
+      {
+        active: true,
+        start_time: next.start_time,
+        start_time_formatted: formatStartTime(next.start_time),
+        start_date: startDateObj.toLocaleString("en-US", {
+          timeZone: "America/New_York",
+          month: "2-digit",
+          day: "2-digit",
+          year: "numeric",
+        }),
+        join_url: next.join_url || null,
+        registration_url: meetingDetails.registration_url || null,
+        topic: next.topic || null,
+        webinar_id: next.id,
+        is_today: toNYDateString(startDateObj) === toNYDateString(now) ? 1 : 0,
+        is_tomorrow:
+          toNYDateString(startDateObj) === toNYDateString(tomorrow) ? 1 : 0,
+      },
+      { headers: corsHeaders() },
+    );
   } catch (err) {
     console.error(err);
     return NextResponse.json(
