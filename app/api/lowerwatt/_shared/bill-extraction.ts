@@ -65,7 +65,8 @@ Rules:
 - Billing period: use stated billing/service period; for water, meter read start/end dates are fine.
 - Usage: primary period usage number; set usageUnit (kWh, therms, CCF, etc.).
 - Delivery vs supply (electric/gas):
-  - Delivery = delivery / distribution / customer / demand / societal benefits when grouped under delivery.
+  - If the bill clearly labels a "Delivery Charge" (or Delivery Charges) line with an amount, use that amount for deliveryCharges — do NOT substitute "Total Usage Costs" or other rollups that also include customer / service charges.
+  - Otherwise Delivery = delivery / distribution / customer / demand / societal benefits when those are grouped under delivery with no separate labeled delivery line.
   - Supply = BGSS / BGS / cost of energy / supply charges.
   - Gas fallback: if supply cannot be separated, put all commodity charges in deliveryCharges and note "supply included in delivery".
 - Water:
