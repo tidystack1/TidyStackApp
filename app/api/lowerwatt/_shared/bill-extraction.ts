@@ -9,12 +9,16 @@ Return ONLY a single JSON object with this exact shape:
 
 {
   "mode": "new_account",
-  "account": {
+  "details": {
     "nameOnUtilityBill": string | null,
     "utility": string | null,
     "supplier": string | null,
     "accountNumber": string | null,
-    "serviceAddress": string | null,
+    "serviceAddressStreet": string | null,
+    "serviceAddressSuiteApt": string | null,
+    "serviceAddressCity": string | null,
+    "serviceAddressState": string | null,
+    "serviceAddressZip": string | null,
     "rateClass": string | null,
     "meterNumber": string | null,
     "meterSize": string | null,
@@ -23,9 +27,7 @@ Return ONLY a single JSON object with this exact shape:
     "payingSalesTax": "Yes" | "No" | null,
     "procurementAccountNumber": string | null,
     "phoneNumber": string | null,
-    "typeOfService": "Water" | "Gas" | "Electric" | null
-  },
-  "invoice": {
+    "typeOfService": "Water" | "Gas" | "Electric" | null,
     "billingPeriodStart": string | null,
     "billingPeriodEnd": string | null,
     "usagePerBillingPeriod": number | null,
@@ -46,7 +48,13 @@ Return ONLY a single JSON object with this exact shape:
 Rules:
 - Prefer values printed on the bill. Use null when a field is not present.
 - Account #: required when visible; keep formatting as printed (spaces/dashes ok).
-- Service address: street, city, state, zip when available. Do not use mailing address if a distinct service address exists.
+- Service address: split into separate fields — do NOT return one combined address string.
+  - serviceAddressStreet: street number + street name only (e.g. "123 Main St").
+  - serviceAddressSuiteApt: suite, apartment, unit, floor, or similar (e.g. "Apt 4B", "Suite 200"); null if none.
+  - serviceAddressCity: city name only.
+  - serviceAddressState: 2-letter state code when available (e.g. "NJ"), otherwise as printed.
+  - serviceAddressZip: ZIP or ZIP+4 when available.
+  - Prefer the service / premise address over the mailing address when both exist.
 - Supplier: null when the utility supplies the commodity itself.
 - Rate class: e.g. GLP, General Service, GS-1, etc.
 - Type of service: classify the bill as exactly one of "Water", "Gas", or "Electric" (primary commodity). Use water/sewer/CCF/gallons cues for Water; therms/BGSS/gas cues for Gas; kWh/electric/BGS cues for Electric. If unclear or multi-commodity with no primary, use null.
@@ -85,14 +93,18 @@ export const BILL_EXTRACTION_INPUT_SCHEMA: InputSchema = {
   type: "object",
   properties: {
     mode: { type: "string", enum: ["new_account"] },
-    account: {
+    details: {
       type: "object",
       properties: {
         nameOnUtilityBill: nullableString,
         utility: nullableString,
         supplier: nullableString,
         accountNumber: nullableString,
-        serviceAddress: nullableString,
+        serviceAddressStreet: nullableString,
+        serviceAddressSuiteApt: nullableString,
+        serviceAddressCity: nullableString,
+        serviceAddressState: nullableString,
+        serviceAddressZip: nullableString,
         rateClass: nullableString,
         meterNumber: nullableString,
         meterSize: nullableString,
@@ -114,28 +126,6 @@ export const BILL_EXTRACTION_INPUT_SCHEMA: InputSchema = {
           type: ["string", "null"],
           enum: ["Water", "Gas", "Electric", null],
         },
-      },
-      required: [
-        "nameOnUtilityBill",
-        "utility",
-        "supplier",
-        "accountNumber",
-        "serviceAddress",
-        "rateClass",
-        "meterNumber",
-        "meterSize",
-        "netMeterSolar",
-        "unitOfMeasurement",
-        "payingSalesTax",
-        "procurementAccountNumber",
-        "phoneNumber",
-        "typeOfService",
-      ],
-      additionalProperties: false,
-    },
-    invoice: {
-      type: "object",
-      properties: {
         billingPeriodStart: nullableString,
         billingPeriodEnd: nullableString,
         usagePerBillingPeriod: nullableNumber,
@@ -161,6 +151,24 @@ export const BILL_EXTRACTION_INPUT_SCHEMA: InputSchema = {
         total: nullableNumber,
       },
       required: [
+        "nameOnUtilityBill",
+        "utility",
+        "supplier",
+        "accountNumber",
+        "serviceAddressStreet",
+        "serviceAddressSuiteApt",
+        "serviceAddressCity",
+        "serviceAddressState",
+        "serviceAddressZip",
+        "rateClass",
+        "meterNumber",
+        "meterSize",
+        "netMeterSolar",
+        "unitOfMeasurement",
+        "payingSalesTax",
+        "procurementAccountNumber",
+        "phoneNumber",
+        "typeOfService",
         "billingPeriodStart",
         "billingPeriodEnd",
         "usagePerBillingPeriod",
@@ -182,7 +190,7 @@ export const BILL_EXTRACTION_INPUT_SCHEMA: InputSchema = {
     },
     confidence: { type: "string", enum: ["high", "medium", "low"] },
   },
-  required: ["mode", "account", "invoice", "notes", "confidence"],
+  required: ["mode", "details", "notes", "confidence"],
   additionalProperties: false,
 };
 
