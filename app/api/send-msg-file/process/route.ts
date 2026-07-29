@@ -177,6 +177,15 @@ async function logSupportedCategoryRequest(data: {
   }
 }
 
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  try {
+    return await fn();
+  } finally {
+    console.info(`[send-msg-file/process] ${label}: ${Date.now() - start}ms`);
+  }
+}
+
 /**
  * Forward a Blob read URL (not the file bytes) so large .msg files stay under
  * Vercel's ~4.5MB serverless request body limit. Downstream routes download.
@@ -255,25 +264,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const msgUrl = await createMsgReadUrl(pathname);
-    await assertMsgBlobReady(pathname, msgUrl);
+    const requestStart = Date.now();
+    const msgUrl = await timed("createMsgReadUrl", () =>
+      createMsgReadUrl(pathname),
+    );
+    await timed("assertMsgBlobReady", () =>
+      assertMsgBlobReady(pathname, msgUrl),
+    );
     const filename = filenameFromPathname(pathname);
 
     if (category === CATEGORY_HUBSPOT_DEAL) {
       // TEMP logging only — remove before going live.
-      await logSupportedCategoryRequest({
-        category,
-        filename,
-        ...(triggeredBy !== undefined ? { triggeredBy } : {}),
-      });
+      await timed("logSupportedCategoryRequest", () =>
+        logSupportedCategoryRequest({
+          category,
+          filename,
+          ...(triggeredBy !== undefined ? { triggeredBy } : {}),
+        }),
+      );
 
-      const { payload, status } = await forwardToEmailToDealMsg(
-        request,
-        msgUrl,
+      const { payload, status } = await timed("forwardToEmailToDealMsg", () =>
+        forwardToEmailToDealMsg(request, msgUrl),
       );
       if (status >= 200 && status < 300) {
-        await deleteUploadedMsgBlob(pathname);
+        await timed("deleteUploadedMsgBlob", () =>
+          deleteUploadedMsgBlob(pathname),
+        );
       }
+      console.info(
+        `[send-msg-file/process] total: ${Date.now() - requestStart}ms (status=${status})`,
+      );
       return jsonResponse(payload, true, status);
     }
 

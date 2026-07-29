@@ -318,17 +318,37 @@ async function parseRequestBody(
   );
 }
 
-export async function POST(request: NextRequest) {
+async function timed<T>(label: string, fn: () => Promise<T> | T): Promise<T> {
+  const start = Date.now();
   try {
-    const body = await parseRequestBody(request);
-    const rawMsg = await resolveMsgBuffer(body);
-    const parsed = parseMsg(rawMsg);
-    const booking = await extractBookingFromEmail(parsed);
+    return await fn();
+  } finally {
+    console.info(`[email-to-deal/msg] ${label}: ${Date.now() - start}ms`);
+  }
+}
 
-    const deal = await createHubSpotDealFromBooking(
-      booking,
-      parsed.from,
-      parsed.to,
+export async function POST(request: NextRequest) {
+  const requestStart = Date.now();
+  try {
+    const body = await timed("parseRequestBody", () => parseRequestBody(request));
+    const rawMsg = await timed("resolveMsgBuffer", () => resolveMsgBuffer(body));
+    console.info(
+      `[email-to-deal/msg] msgBytes=${rawMsg.length} (~${(rawMsg.length / (1024 * 1024)).toFixed(2)}MB)`,
+    );
+    const parsed = await timed("parseMsg", () => parseMsg(rawMsg));
+    console.info(
+      `[email-to-deal/msg] parsed images=${parsed.images.length} subjectLen=${parsed.subject.length} plainTextLen=${parsed.plainText.length}`,
+    );
+    const booking = await timed("extractBookingFromEmail", () =>
+      extractBookingFromEmail(parsed),
+    );
+
+    const deal = await timed("createHubSpotDealFromBooking", () =>
+      createHubSpotDealFromBooking(booking, parsed.from, parsed.to),
+    );
+
+    console.info(
+      `[email-to-deal/msg] total: ${Date.now() - requestStart}ms dealId=${deal.dealId}`,
     );
 
     return NextResponse.json({
@@ -352,6 +372,9 @@ export async function POST(request: NextRequest) {
       ownerAssigned: deal.ownerAssigned,
     });
   } catch (error) {
+    console.info(
+      `[email-to-deal/msg] total (failed): ${Date.now() - requestStart}ms`,
+    );
     console.error("[email-to-deal/msg] Error:", error);
     const message = error instanceof Error ? error.message : String(error);
     const isClientError =
