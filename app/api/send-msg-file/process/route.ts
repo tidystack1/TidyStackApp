@@ -11,7 +11,7 @@ import {
 } from "../_shared/verify-plugin-shared-secret";
 
 /** Vercel Hobby/Fluid max; waits on downstream category handlers (download + LLM). */
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 const EMAIL_TO_DEAL_MSG_PATH = "/api/highviewtravel/email-to-deal/msg";
 const READ_URL_TTL_MS = 10 * 60 * 1000;
@@ -272,7 +272,10 @@ export async function POST(request: NextRequest) {
         ...(triggeredBy !== undefined ? { triggeredBy } : {}),
       });
 
-      const { payload, status } = await forwardToEmailToDealMsg(request, msgUrl);
+      const { payload, status } = await forwardToEmailToDealMsg(
+        request,
+        msgUrl,
+      );
       if (status >= 200 && status < 300) {
         await deleteUploadedMsgBlob(pathname);
       }

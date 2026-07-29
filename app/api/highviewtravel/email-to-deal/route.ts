@@ -4,7 +4,7 @@ import { createHubSpotDealFromBooking } from "../_shared/hubspot-deal";
 import { parseEml } from "../_shared/parse-eml";
 
 /** Vercel Hobby/Fluid max; email parse + LLM extraction. */
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 function parseInfoPayload(raw: unknown): Record<string, unknown> | null {
   if (typeof raw === "string") {
@@ -27,7 +27,9 @@ function parseInfoPayload(raw: unknown): Record<string, unknown> | null {
   return null;
 }
 
-function parseInfoBody(body: Record<string, unknown>): Record<string, unknown> | null {
+function parseInfoBody(
+  body: Record<string, unknown>,
+): Record<string, unknown> | null {
   const direct = parseInfoPayload(body.info);
   if (direct) return direct;
 
@@ -117,7 +119,9 @@ function emlFromPayload(body: Record<string, unknown>): string | null {
     }
   }
 
-  const emlUrl = fieldText(source.emlUrl ?? source.url ?? body.emlUrl ?? body.url);
+  const emlUrl = fieldText(
+    source.emlUrl ?? source.url ?? body.emlUrl ?? body.url,
+  );
   if (emlUrl) return emlUrl;
 
   return null;
@@ -136,7 +140,9 @@ async function downloadEml(url: string): Promise<string> {
   return res.text();
 }
 
-async function resolveEmlContent(body: Record<string, unknown>): Promise<string> {
+async function resolveEmlContent(
+  body: Record<string, unknown>,
+): Promise<string> {
   const eml = emlFromPayload(body);
   if (!eml) {
     throw new Error(
@@ -199,7 +205,9 @@ function parseMultipartLenient(
   return fields;
 }
 
-async function parseRequestBody(request: NextRequest): Promise<Record<string, unknown>> {
+async function parseRequestBody(
+  request: NextRequest,
+): Promise<Record<string, unknown>> {
   const contentType = request.headers.get("content-type") ?? "";
 
   if (contentType.includes("multipart/form-data")) {
@@ -228,7 +236,8 @@ async function parseRequestBody(request: NextRequest): Promise<Record<string, un
 
       const fields: Record<string, unknown> = { _contentType: contentType };
       for (const [key, value] of form.entries()) {
-        fields[key] = value instanceof File ? await value.text() : String(value);
+        fields[key] =
+          value instanceof File ? await value.text() : String(value);
       }
       return fields;
     } catch {
@@ -236,9 +245,17 @@ async function parseRequestBody(request: NextRequest): Promise<Record<string, un
       fields._contentType = contentType;
 
       const fileField =
-        fields.eml ?? fields.file ?? fields.email ?? fields.File ?? fields.attachment;
+        fields.eml ??
+        fields.file ??
+        fields.email ??
+        fields.File ??
+        fields.attachment;
       if (typeof fileField === "string" && fileField) {
-        return { eml: fileField, _contentType: contentType, _filename: fields._filename };
+        return {
+          eml: fileField,
+          _contentType: contentType,
+          _filename: fields._filename,
+        };
       }
 
       return fields;

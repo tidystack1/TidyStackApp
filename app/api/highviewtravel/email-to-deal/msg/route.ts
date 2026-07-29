@@ -4,7 +4,7 @@ import { createHubSpotDealFromBooking } from "../../_shared/hubspot-deal";
 import { parseMsg } from "../../_shared/parse-msg";
 
 /** Vercel Hobby/Fluid max; .msg download + parse + LLM extraction. */
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 function parseInfoPayload(raw: unknown): Record<string, unknown> | null {
   if (typeof raw === "string") {
@@ -27,7 +27,9 @@ function parseInfoPayload(raw: unknown): Record<string, unknown> | null {
   return null;
 }
 
-function parseInfoBody(body: Record<string, unknown>): Record<string, unknown> | null {
+function parseInfoBody(
+  body: Record<string, unknown>,
+): Record<string, unknown> | null {
   const direct = parseInfoPayload(body.info);
   if (direct) return direct;
 
@@ -140,7 +142,9 @@ function msgFromPayload(body: Record<string, unknown>): Buffer | string | null {
     if (resolved) return resolved;
   }
 
-  const msgUrl = fieldText(source.msgUrl ?? source.url ?? body.msgUrl ?? body.url);
+  const msgUrl = fieldText(
+    source.msgUrl ?? source.url ?? body.msgUrl ?? body.url,
+  );
   if (msgUrl) return msgUrl;
 
   return null;
@@ -159,7 +163,9 @@ async function downloadMsg(url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
-async function resolveMsgBuffer(body: Record<string, unknown>): Promise<Buffer> {
+async function resolveMsgBuffer(
+  body: Record<string, unknown>,
+): Promise<Buffer> {
   const msg = msgFromPayload(body);
   if (!msg) {
     throw new Error(
@@ -227,7 +233,9 @@ function parseMultipartLenient(
   return fields;
 }
 
-async function parseRequestBody(request: NextRequest): Promise<Record<string, unknown>> {
+async function parseRequestBody(
+  request: NextRequest,
+): Promise<Record<string, unknown>> {
   const contentType = request.headers.get("content-type") ?? "";
   const buffer = Buffer.from(await request.arrayBuffer());
 
@@ -244,7 +252,10 @@ async function parseRequestBody(request: NextRequest): Promise<Record<string, un
       }).formData();
 
       const file =
-        form.get("msg") ?? form.get("file") ?? form.get("email") ?? form.get("eml");
+        form.get("msg") ??
+        form.get("file") ??
+        form.get("email") ??
+        form.get("eml");
 
       if (file instanceof File) {
         const fileBuffer = Buffer.from(await file.arrayBuffer());
