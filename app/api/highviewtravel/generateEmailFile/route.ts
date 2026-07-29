@@ -164,7 +164,7 @@ function buildBookingLinkEml(
     "Airlines do not allow name changes. We will not be responsible for any fees",
     "or fare differences that will occur if a reservation needs to be rebooked.",
     "",
-    "If all is in order, here's the form link to proceed with issuance:",
+    "If all is in order, here's the form link to proceed with issuance.",
     "",
     formLink,
     "",
@@ -190,7 +190,7 @@ function buildBookingLinkEml(
 <p style="white-space:pre-wrap;margin:0;">${withLineBreaksHtml(reservationDetails)}</p>
 <p>Please ensure that the names and flights are booked correctly.</p>
 <p>Airlines do not allow name changes. We will not be responsible for any fees or fare differences that will occur if a reservation needs to be rebooked.</p>
-<p>If all is in order, here's the form <a href="${escapeHtmlAttr(formLink)}">LINK</a> to proceed with issuance:</p>
+<p>If all is in order, here's the form <a href="${escapeHtmlAttr(formLink)}">LINK</a> to proceed with issuance.</p>
 <p>The submission gives us consent that these flights will be paid in full.</p>
 <p><strong>Forms that come through by 5:45 pm will be issued same day. Otherwise, it'll be handled on the next business day.</strong></p>
 <p style="margin:12px 0 0;"><strong>INSERT SIGNATURE HERE</strong></p>
@@ -283,11 +283,7 @@ export async function POST(request: NextRequest) {
       token,
     );
 
-    await patchDealProperties(
-      hubspotDealId,
-      { [property]: fileId },
-      token,
-    );
+    await patchDealProperties(hubspotDealId, { [property]: fileId }, token);
 
     console.log(`[generateEmailFile] Deal ${hubspotDealId} updated`);
 
