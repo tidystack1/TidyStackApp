@@ -10,9 +10,6 @@ import {
   verifyPluginSharedSecret,
 } from "../_shared/verify-plugin-shared-secret";
 
-/** Vercel Hobby/Fluid max; waits on downstream category handlers (download + LLM). */
-export const maxDuration = 60;
-
 const EMAIL_TO_DEAL_MSG_PATH = "/api/highviewtravel/email-to-deal/msg";
 const READ_URL_TTL_MS = 10 * 60 * 1000;
 
@@ -167,7 +164,6 @@ const LOGGING_WEBHOOK_URL =
 async function logSupportedCategoryRequest(data: {
   category: string;
   filename: string;
-  msgUrl: string;
   triggeredBy?: string;
 }): Promise<void> {
   try {
@@ -268,7 +264,6 @@ export async function POST(request: NextRequest) {
       await logSupportedCategoryRequest({
         category,
         filename,
-        msgUrl,
         ...(triggeredBy !== undefined ? { triggeredBy } : {}),
       });
 
