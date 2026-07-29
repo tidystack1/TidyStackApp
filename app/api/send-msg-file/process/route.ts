@@ -67,7 +67,7 @@ function requirePathname(pathname: unknown): string {
   return normalized;
 }
 
-async function fetchMsgFromBlob(pathname: string): Promise<Buffer> {
+async function createMsgReadUrl(pathname: string): Promise<string> {
   const validUntil = Date.now() + READ_URL_TTL_MS;
 
   const token = await issueSignedToken({
@@ -82,24 +82,55 @@ async function fetchMsgFromBlob(pathname: string): Promise<Buffer> {
     access: "private",
   });
 
-  const res = await fetch(presignedUrl);
+  return presignedUrl;
+}
+
+/** Confirms the blob exists and looks like a .msg without buffering the whole file. */
+async function assertMsgBlobReady(
+  pathname: string,
+  readUrl: string,
+): Promise<void> {
+  const res = await fetch(readUrl, {
+    headers: { Range: "bytes=0-7" },
+  });
   if (res.status === 404) {
     throw new BlobMsgNotFoundError(pathname);
   }
-  if (!res.ok) {
+  if (!res.ok && res.status !== 206) {
     const text = await res.text();
     throw new Error(
-      `Failed to download .msg from blob storage (${res.status}): ${text.slice(0, 300)}`,
+      `Failed to read .msg from blob storage (${res.status}): ${text.slice(0, 300)}`,
     );
   }
 
-  const msgBuffer = Buffer.from(await res.arrayBuffer());
-  if (!looksLikeMsgBuffer(msgBuffer)) {
+  const header = await readFirstBytes(res, 8);
+  if (!looksLikeMsgBuffer(header)) {
     throw new Error(
       "Downloaded file does not look like a .msg file (missing OLE signature).",
     );
   }
-  return msgBuffer;
+}
+
+async function readFirstBytes(res: Response, n: number): Promise<Buffer> {
+  if (!res.body) {
+    return Buffer.from(await res.arrayBuffer()).subarray(0, n);
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < n) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      chunks.push(value);
+      total += value.length;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+
+  return Buffer.concat(chunks.map((c) => Buffer.from(c))).subarray(0, n);
 }
 
 class BlobMsgNotFoundError extends Error {
@@ -133,7 +164,7 @@ const LOGGING_WEBHOOK_URL =
 async function logSupportedCategoryRequest(data: {
   category: string;
   filename: string;
-  msgBase64: string;
+  msgUrl: string;
   triggeredBy?: string;
 }): Promise<void> {
   try {
@@ -147,24 +178,19 @@ async function logSupportedCategoryRequest(data: {
   }
 }
 
+/**
+ * Forward a Blob read URL (not the file bytes) so large .msg files stay under
+ * Vercel's ~4.5MB serverless request body limit. Downstream routes download.
+ */
 async function forwardToEmailToDealMsg(
   request: NextRequest,
-  msgBuffer: Buffer,
-  filename: string,
+  msgUrl: string,
 ): Promise<{ payload: unknown; status: number }> {
-  const form = new FormData();
-  form.append(
-    "msg",
-    new Blob([new Uint8Array(msgBuffer)], {
-      type: "application/vnd.ms-outlook",
-    }),
-    filename.endsWith(".msg") ? filename : `${filename}.msg`,
-  );
-
   const targetUrl = new URL(EMAIL_TO_DEAL_MSG_PATH, request.url);
   const upstream = await fetch(targetUrl, {
     method: "POST",
-    body: form,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ msgUrl }),
   });
 
   const text = await upstream.text();
@@ -230,7 +256,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const msgBuffer = await fetchMsgFromBlob(pathname);
+    const msgUrl = await createMsgReadUrl(pathname);
+    await assertMsgBlobReady(pathname, msgUrl);
     const filename = filenameFromPathname(pathname);
 
     if (category === CATEGORY_HUBSPOT_DEAL) {
@@ -238,15 +265,11 @@ export async function POST(request: NextRequest) {
       await logSupportedCategoryRequest({
         category,
         filename,
-        msgBase64: msgBuffer.toString("base64"),
+        msgUrl,
         ...(triggeredBy !== undefined ? { triggeredBy } : {}),
       });
 
-      const { payload, status } = await forwardToEmailToDealMsg(
-        request,
-        msgBuffer,
-        filename,
-      );
+      const { payload, status } = await forwardToEmailToDealMsg(request, msgUrl);
       if (status >= 200 && status < 300) {
         await deleteUploadedMsgBlob(pathname);
       }

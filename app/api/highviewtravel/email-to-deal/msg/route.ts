@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractBookingFromEmail } from "../../_shared/extract-booking-from-email";
-// DISABLED for Outlook testing — uncomment with HubSpot create below
-// import { createHubSpotDealFromBooking } from "../../_shared/hubspot-deal";
+import { createHubSpotDealFromBooking } from "../../_shared/hubspot-deal";
 import { parseMsg } from "../../_shared/parse-msg";
 
 function parseInfoPayload(raw: unknown): Record<string, unknown> | null {
@@ -315,30 +314,14 @@ export async function POST(request: NextRequest) {
     const parsed = parseMsg(rawMsg);
     const booking = await extractBookingFromEmail(parsed);
 
-    // --- HubSpot create (DISABLED for Outlook testing) ---
-    // Uncomment the block below and remove the stub `deal` object when ready
-    // to create HubSpot deals again.
-    //
-    // const deal = await createHubSpotDealFromBooking(
-    //   booking,
-    //   parsed.from,
-    //   parsed.to,
-    // );
-    const deal = {
-      dealId: "TEST_DEAL_ID",
-      dealName: `${booking.passengerName ?? "Unknown"} ${booking.departureAirport ?? ""} ${booking.arrivalAirport ?? ""} ${booking.outboundDate ?? ""}/${booking.returnDate ?? ""}`.trim(),
-      contactId: null as string | null,
-      contactEmail: parsed.from || "unknown@example.com",
-      contactAssociated: false,
-      ownerId: null as string | null,
-      ownerEmail: null as string | null,
-      ownerAssigned: false,
-    };
-    // --- end HubSpot create (DISABLED) ---
+    const deal = await createHubSpotDealFromBooking(
+      booking,
+      parsed.from,
+      parsed.to,
+    );
 
     return NextResponse.json({
       success: true,
-      hubspotDisabled: true, // remove when HubSpot create is re-enabled
       passengerName: booking.passengerName,
       departureAirport: booking.departureAirport,
       arrivalAirport: booking.arrivalAirport,
