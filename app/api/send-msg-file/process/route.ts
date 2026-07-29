@@ -10,6 +10,9 @@ import {
   verifyPluginSharedSecret,
 } from "../_shared/verify-plugin-shared-secret";
 
+/** Vercel Hobby/Fluid max; waits on downstream category handlers (download + LLM). */
+export const maxDuration = 300;
+
 const EMAIL_TO_DEAL_MSG_PATH = "/api/highviewtravel/email-to-deal/msg";
 const READ_URL_TTL_MS = 10 * 60 * 1000;
 

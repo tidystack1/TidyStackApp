@@ -3,6 +3,9 @@ import { extractBookingFromEmail } from "../../_shared/extract-booking-from-emai
 import { createHubSpotDealFromBooking } from "../../_shared/hubspot-deal";
 import { parseMsg } from "../../_shared/parse-msg";
 
+/** Vercel Hobby/Fluid max; .msg download + parse + LLM extraction. */
+export const maxDuration = 300;
+
 function parseInfoPayload(raw: unknown): Record<string, unknown> | null {
   if (typeof raw === "string") {
     try {
