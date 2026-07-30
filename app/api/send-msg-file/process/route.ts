@@ -12,6 +12,9 @@ import {
 
 const EMAIL_TO_DEAL_MSG_PATH = "/api/highviewtravel/email-to-deal/msg";
 const READ_URL_TTL_MS = 10 * 60 * 1000;
+const BLOB_CHECK_TIMEOUT_MS = 30_000;
+const LOGGING_WEBHOOK_TIMEOUT_MS = 10_000;
+const FORWARD_TIMEOUT_MS = 240_000;
 
 /** OLE/CFBF compound files (including .msg) start with this signature. */
 function looksLikeMsgBuffer(buffer: Buffer): boolean {
@@ -92,6 +95,7 @@ async function assertMsgBlobReady(
 ): Promise<void> {
   const res = await fetch(readUrl, {
     headers: { Range: "bytes=0-7" },
+    signal: AbortSignal.timeout(BLOB_CHECK_TIMEOUT_MS),
   });
   if (res.status === 404) {
     throw new BlobMsgNotFoundError(pathname);
@@ -171,6 +175,7 @@ async function logSupportedCategoryRequest(data: {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
+      signal: AbortSignal.timeout(LOGGING_WEBHOOK_TIMEOUT_MS),
     });
   } catch (error) {
     console.error("[send-msg-file/process] Logging webhook failed:", error);
@@ -199,6 +204,7 @@ async function forwardToEmailToDealMsg(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ msgUrl }),
+    signal: AbortSignal.timeout(FORWARD_TIMEOUT_MS),
   });
 
   const text = await upstream.text();
@@ -265,9 +271,11 @@ export async function POST(request: NextRequest) {
     }
 
     const requestStart = Date.now();
+    console.info("[send-msg-file/process] starting createMsgReadUrl");
     const msgUrl = await timed("createMsgReadUrl", () =>
       createMsgReadUrl(pathname),
     );
+    console.info("[send-msg-file/process] starting assertMsgBlobReady");
     await timed("assertMsgBlobReady", () =>
       assertMsgBlobReady(pathname, msgUrl),
     );
@@ -275,6 +283,9 @@ export async function POST(request: NextRequest) {
 
     if (category === CATEGORY_HUBSPOT_DEAL) {
       // TEMP logging only — remove before going live.
+      console.info(
+        "[send-msg-file/process] starting logSupportedCategoryRequest",
+      );
       await timed("logSupportedCategoryRequest", () =>
         logSupportedCategoryRequest({
           category,
@@ -283,6 +294,7 @@ export async function POST(request: NextRequest) {
         }),
       );
 
+      console.info("[send-msg-file/process] starting forwardToEmailToDealMsg");
       const { payload, status } = await timed("forwardToEmailToDealMsg", () =>
         forwardToEmailToDealMsg(request, msgUrl),
       );
