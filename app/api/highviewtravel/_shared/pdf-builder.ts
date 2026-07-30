@@ -12,6 +12,21 @@ export function str(data: FormData, key: string): string {
   return (data[key] ?? "").trim();
 }
 
+/**
+ * Helvetica is WinAnsi-only; some characters will be converted (accents stripped,
+ * smart punctuation normalized) or replaced with "?" so PDF generation does not throw.
+ */
+function toPdfSafe(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u2026/g, "...")
+    .replace(/[^\t\n\r\u0020-\u007E\u00A0-\u00FF]/g, "?");
+}
+
 /** `"Is Fora"` is `"Yes"` or `"No"`; missing/null defaults to not Fora. */
 export function isForaBooking(data: FormData): boolean {
   return str(data, "Is Fora").toUpperCase() === "YES";
@@ -122,6 +137,7 @@ function drawSectionHeader(ctx: DrawCtx, title: string): DrawCtx {
 
 function wrapText(text: string, font: PDFFont, size: number, maxW: number): string[] {
   if (!text) return [""];
+  text = toPdfSafe(text);
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let current = "";
@@ -230,7 +246,7 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
     color: COLOR_HEADER_TITLE,
   });
 
-  const dealName = str(data, "HubSpot Deal Name") || "booking";
+  const dealName = toPdfSafe(str(data, "HubSpot Deal Name") || "booking");
   ctx.page.drawText(`Hubspot Deal: ${dealName}`, {
     x: titleX,
     y: PAGE_H - 54,
@@ -286,7 +302,9 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
     for (let i = 1; i <= numPassengers; i++) {
       ctx = ensureSpace(ctx, 24);
       const passengerName = str(data, `Passenger ${i} Name`);
-      const passengerLabel = passengerName ? `Passenger ${i} - ${passengerName}` : `Passenger ${i}`;
+      const passengerLabel = toPdfSafe(
+        passengerName ? `Passenger ${i} - ${passengerName}` : `Passenger ${i}`,
+      );
 
       ctx.page.drawRectangle({ x: MARGIN, y: ctx.y - 16, width: CONTENT_W, height: 18, color: COLOR_PASSENGER_BAR });
       ctx.page.drawText(passengerLabel, { x: MARGIN + 8, y: ctx.y - 11, size: 9, font: boldFont, color: COLOR_WHITE });
