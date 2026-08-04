@@ -630,19 +630,19 @@ async function generateLabelsListPDF(
 ): Promise<Buffer> {
   const pdfDoc = await PDFDocument.create();
 
-  // Avery label sizing for A4 (2 across, 10 down)
-  // Each label: 4 inches wide x 1 inch tall
-  const labelWidth = 280; // points (slightly less for gaps)
-  const labelHeight = 70; // points (slightly less for gaps)
-  const gapX = 8; // horizontal gap between labels
-  const gapY = 5; // vertical gap between labels
-  const marginLeft = 8;
-  const marginTop = 8;
+  // Avery 8161 (same template as 5161): Letter, 2 across × 10 down
+  // Label: 4" × 1"; column pitch 4.1875"; row pitch 1"
+  const labelWidth = 4 * 72; // 288 pt
+  const labelHeight = 1 * 72; // 72 pt
+  const columnPitch = 4.1875 * 72; // 301.5 pt (includes 0.1875" gutter)
+  const rowPitch = 1 * 72; // 72 pt (labels abut vertically)
+  const marginLeft = 0.15625 * 72; // 11.25 pt
+  const marginTop = 0.5 * 72; // 36 pt
   const labelsPerRow = 2;
   const labelsPerColumn = 10;
 
-  const pageWidth = 595; // A4 width in points
-  const pageHeight = 842; // A4 height in points
+  const pageWidth = 612; // US Letter width in points
+  const pageHeight = 792; // US Letter height in points
 
   // Exclude records with no box size text (empty labels)
   const labelRecords = records.filter((record) =>
@@ -688,11 +688,9 @@ async function generateLabelsListPDF(
     const recalculatedRowIndex = Math.floor(labelIndex / labelsPerRow);
     const recalculatedColIndex = labelIndex % labelsPerRow;
 
-    const xPosition = marginLeft + recalculatedColIndex * (labelWidth + gapX);
+    const xPosition = marginLeft + recalculatedColIndex * columnPitch;
     const yPosition =
-      pageHeight -
-      marginTop -
-      (recalculatedRowIndex + 1) * (labelHeight + gapY);
+      pageHeight - marginTop - (recalculatedRowIndex + 1) * rowPitch;
 
     // Draw label border
     activePage.drawRectangle({
