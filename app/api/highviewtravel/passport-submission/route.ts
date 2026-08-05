@@ -9,7 +9,15 @@ type FormstackFieldValue = {
   label?: string;
   value?: string;
   type?: string;
-  url?: string;
+  url?: string | string[];
+};
+
+type ResolvedPassportFile = {
+  bytes: Uint8Array;
+  fileName: string;
+  mimeType: string;
+  source: string;
+  index: number;
 };
 
 function getConfig() {
@@ -68,6 +76,22 @@ function fieldId(field: unknown): string {
   if (!field || typeof field !== "object") return "";
   const id = (field as FormstackFieldValue).field_id;
   return id != null ? String(id).trim() : "";
+}
+
+/** Zero-based Formstack upload indexes from `File.url` (`.../file/{id}/0`, `/1`, …). */
+function fileIndexesFromField(field: unknown): number[] {
+  if (!field || typeof field !== "object") return [0];
+
+  const url = (field as FormstackFieldValue).url;
+  const urls = Array.isArray(url) ? url : url ? [url] : [];
+  if (urls.length === 0) return [0];
+
+  const indexes = urls.map((entry, i) => {
+    const match = /\/(\d+)\/?$/.exec(String(entry).trim());
+    return match ? Number(match[1]) : i;
+  });
+
+  return [...new Set(indexes)].sort((a, b) => a - b);
 }
 
 function isZapierHydrateToken(value: string): boolean {
@@ -200,8 +224,12 @@ async function downloadFromFormstackSubmission(
   submissionId: string,
   uploadFieldId: string,
   formstackToken: string,
+  index: number,
 ): Promise<{ bytes: Uint8Array; fileName: string; mimeType: string }> {
-  const params = new URLSearchParams({ fieldId: uploadFieldId });
+  const params = new URLSearchParams({
+    fieldId: uploadFieldId,
+    index: String(index),
+  });
   const url = `https://www.formstack.com/api/v2025/submissions/${encodeURIComponent(submissionId)}/upload?${params}`;
 
   const res = await fetch(url, {
@@ -214,11 +242,11 @@ async function downloadFromFormstackSubmission(
   if (!res.ok) {
     const text = await res.text();
     throw new Error(
-      `Formstack file download failed (${res.status}): ${text.slice(0, 300)}`,
+      `Formstack file download failed (${res.status}, index=${index}): ${text.slice(0, 300)}`,
     );
   }
 
-  const fallbackFileName = `passport_${submissionId}`;
+  const fallbackFileName = `passport_${submissionId}_${index}`;
   const fileName = fileNameFromResponse(
     res.headers.get("content-disposition"),
     fallbackFileName,
@@ -229,31 +257,37 @@ async function downloadFromFormstackSubmission(
   return { bytes, fileName, mimeType };
 }
 
-async function resolvePassportFile(
+async function resolvePassportFiles(
   info: Record<string, unknown>,
-): Promise<{ bytes: Uint8Array; fileName: string; mimeType: string; source: string }> {
+): Promise<ResolvedPassportFile[]> {
   const fileField = info["File"];
   const submissionId = fieldText(info["UniqueID"]);
   const uploadFieldId = fieldId(fileField);
   const publicUrl = directFileUrl(fileField);
+  const indexes = fileIndexesFromField(fileField);
 
   if (submissionId && uploadFieldId) {
     const { token: formstackToken } = getFormstackPrefillConfig();
     console.log(
-      `[passport-submission] Downloading via Formstack API (submission=${submissionId}, field=${uploadFieldId})`,
+      `[passport-submission] Downloading ${indexes.length} file(s) via Formstack API (submission=${submissionId}, field=${uploadFieldId}, indexes=${indexes.join(",")})`,
     );
-    const file = await downloadFromFormstackSubmission(
-      submissionId,
-      uploadFieldId,
-      formstackToken,
-    );
-    return { ...file, source: "formstack-api" };
+    const files: ResolvedPassportFile[] = [];
+    for (const index of indexes) {
+      const file = await downloadFromFormstackSubmission(
+        submissionId,
+        uploadFieldId,
+        formstackToken,
+        index,
+      );
+      files.push({ ...file, source: "formstack-api", index });
+    }
+    return files;
   }
 
   if (publicUrl) {
     console.log(`[passport-submission] Downloading from public URL ${publicUrl}`);
     const file = await downloadFromUrl(publicUrl, `passport_${Date.now()}`);
-    return { ...file, source: "direct-url" };
+    return [{ ...file, source: "direct-url", index: 0 }];
   }
 
   throw new Error(
@@ -302,13 +336,13 @@ async function uploadFileToHubSpot(
   return { id: json.id, url: json.url };
 }
 
-async function getDealProperty(
+async function getDealProperties(
   dealId: string,
-  property: string,
+  properties: string[],
   token: string,
-): Promise<string> {
+): Promise<Record<string, string>> {
   const res = await fetch(
-    `https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=${encodeURIComponent(property)}`,
+    `https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=${encodeURIComponent(properties.join(","))}`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
 
@@ -317,21 +351,53 @@ async function getDealProperty(
     throw new Error(`HubSpot deal read failed (${res.status}): ${text}`);
   }
 
-  const json = (await res.json()) as { properties?: Record<string, string> };
-  return (json.properties?.[property] ?? "").trim();
+  const json = (await res.json()) as {
+    properties?: Record<string, string | null | undefined>;
+  };
+  const result: Record<string, string> = {};
+  for (const key of properties) {
+    result[key] = (json.properties?.[key] ?? "").trim();
+  }
+  return result;
+}
+
+async function getHubSpotPortalId(token: string): Promise<string> {
+  const fromEnv = process.env.HIGHVIEWTRAVEL_HUBSPOT_PORTAL_ID?.trim();
+  if (fromEnv) return fromEnv;
+
+  const res = await fetch("https://api.hubapi.com/account-info/v3/details", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HubSpot account lookup failed (${res.status}): ${text}`);
+  }
+
+  const json = (await res.json()) as { portalId?: number | string };
+  const portalId = json.portalId != null ? String(json.portalId).trim() : "";
+  if (!portalId) {
+    throw new Error("HubSpot account lookup returned no portalId");
+  }
+  return portalId;
+}
+
+function hubSpotDealUrl(portalId: string, dealId: string): string {
+  return `https://app.hubspot.com/contacts/${portalId}/record/0-3/${dealId}`;
 }
 
 /** HubSpot multi-file properties use semicolon-separated file IDs. */
-function appendFileId(existing: string, newId: string): string {
-  if (!existing) return newId;
-
+function appendFileIds(existing: string, newIds: string[]): string {
   const ids = existing
     .split(";")
     .map((id) => id.trim())
     .filter(Boolean);
 
-  if (ids.includes(newId)) return existing;
-  return [...ids, newId].join(";");
+  for (const newId of newIds) {
+    if (newId && !ids.includes(newId)) ids.push(newId);
+  }
+
+  return ids.join(";");
 }
 
 async function patchDealProperties(
@@ -379,40 +445,67 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`[passport-submission] Resolving passport file for deal ${dealId}`);
-    const { bytes, fileName: sourceFileName, mimeType: sourceMimeType, source } =
-      await resolvePassportFile(info);
+    console.log(`[passport-submission] Resolving passport file(s) for deal ${dealId}`);
+    const [resolvedFiles, dealProps, portalId] = await Promise.all([
+      resolvePassportFiles(info),
+      getDealProperties(dealId, [HUBSPOT_DEAL_PASSPORT_PROPERTY, "dealname"], token),
+      getHubSpotPortalId(token),
+    ]);
+    const dealName = dealProps.dealname ?? "";
+    const dealUrl = hubSpotDealUrl(portalId, dealId);
 
-    const fileName = buildPassportFileName(dealId, sourceFileName);
-    const ext =
-      extensionFromFileName(sourceFileName) ??
-      extensionFromBytes(bytes) ??
-      "bin";
-    const mimeType =
-      sourceMimeType === "application/octet-stream" ||
-      sourceMimeType === "application/x-www-form-urlencoded"
-        ? mimeTypeFromExtension(ext)
-        : sourceMimeType;
+    const uploaded: Array<{
+      fileId: string;
+      fileUrl: string;
+      fileName: string;
+      sourceFileName: string;
+      source: string;
+      index: number;
+    }> = [];
+
+    for (const resolved of resolvedFiles) {
+      const sourceLabel =
+        resolvedFiles.length > 1
+          ? `${resolved.index}_${resolved.fileName}`
+          : resolved.fileName;
+      const fileName = buildPassportFileName(dealId, sourceLabel);
+      const ext =
+        extensionFromFileName(resolved.fileName) ??
+        extensionFromBytes(resolved.bytes) ??
+        "bin";
+      const mimeType =
+        resolved.mimeType === "application/octet-stream" ||
+        resolved.mimeType === "application/x-www-form-urlencoded"
+          ? mimeTypeFromExtension(ext)
+          : resolved.mimeType;
+
+      console.log(
+        `[passport-submission] Uploading ${fileName} to HubSpot Files (source: ${resolved.fileName}, index: ${resolved.index})`,
+      );
+      const { id: fileId, url: fileUrl } = await uploadFileToHubSpot(
+        resolved.bytes,
+        fileName,
+        mimeType,
+        token,
+      );
+      uploaded.push({
+        fileId,
+        fileUrl,
+        fileName,
+        sourceFileName: resolved.fileName,
+        source: resolved.source,
+        index: resolved.index,
+      });
+    }
+
+    const existingPassport = dealProps[HUBSPOT_DEAL_PASSPORT_PROPERTY] ?? "";
+    const passportValue = appendFileIds(
+      existingPassport,
+      uploaded.map((file) => file.fileId),
+    );
 
     console.log(
-      `[passport-submission] Uploading ${fileName} to HubSpot Files (source: ${sourceFileName})`,
-    );
-    const { id: fileId, url: fileUrl } = await uploadFileToHubSpot(
-      bytes,
-      fileName,
-      mimeType,
-      token,
-    );
-
-    const existingPassport = await getDealProperty(
-      dealId,
-      HUBSPOT_DEAL_PASSPORT_PROPERTY,
-      token,
-    );
-    const passportValue = appendFileId(existingPassport, fileId);
-
-    console.log(
-      `[passport-submission] Updating deal ${dealId} property "${HUBSPOT_DEAL_PASSPORT_PROPERTY}" (append)`,
+      `[passport-submission] Updating deal ${dealId} property "${HUBSPOT_DEAL_PASSPORT_PROPERTY}" (append ${uploaded.length} file(s))`,
     );
     await patchDealProperties(
       dealId,
@@ -420,14 +513,23 @@ export async function POST(request: NextRequest) {
       token,
     );
 
+    const first = uploaded[0]!;
+    const fileUrls = uploaded.map((file) => file.fileUrl);
     return NextResponse.json({
       success: true,
       dealId,
-      fileId,
-      fileUrl,
-      fileName,
-      sourceFileName,
-      source,
+      dealName,
+      dealUrl,
+      passportCount: uploaded.length,
+      fileUrls,
+      fileUrlsText: fileUrls.join("\n"),
+      fileCount: uploaded.length,
+      files: uploaded,
+      fileId: first.fileId,
+      fileUrl: first.fileUrl,
+      fileName: first.fileName,
+      sourceFileName: first.sourceFileName,
+      source: first.source,
       property: HUBSPOT_DEAL_PASSPORT_PROPERTY,
       passportValue,
       appended: Boolean(existingPassport),
