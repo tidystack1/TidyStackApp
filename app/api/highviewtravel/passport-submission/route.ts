@@ -386,6 +386,20 @@ function hubSpotDealUrl(portalId: string, dealId: string): string {
   return `https://app.hubspot.com/contacts/${portalId}/record/0-3/${dealId}`;
 }
 
+async function getOwnerEmail(ownerId: string, token: string): Promise<string> {
+  const res = await fetch(`https://api.hubapi.com/crm/v3/owners/${ownerId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HubSpot owner lookup failed (${res.status}): ${text}`);
+  }
+
+  const json = (await res.json()) as { email?: string };
+  return json.email?.trim() ?? "";
+}
+
 /** HubSpot multi-file properties use semicolon-separated file IDs. */
 function appendFileIds(existing: string, newIds: string[]): string {
   const ids = existing
@@ -448,11 +462,25 @@ export async function POST(request: NextRequest) {
     console.log(`[passport-submission] Resolving passport file(s) for deal ${dealId}`);
     const [resolvedFiles, dealProps, portalId] = await Promise.all([
       resolvePassportFiles(info),
-      getDealProperties(dealId, [HUBSPOT_DEAL_PASSPORT_PROPERTY, "dealname"], token),
+      getDealProperties(
+        dealId,
+        [HUBSPOT_DEAL_PASSPORT_PROPERTY, "dealname", "hubspot_owner_id"],
+        token,
+      ),
       getHubSpotPortalId(token),
     ]);
     const dealName = dealProps.dealname ?? "";
     const dealUrl = hubSpotDealUrl(portalId, dealId);
+    const ownerId = dealProps.hubspot_owner_id ?? "";
+    const ownersEmailPromise = ownerId
+      ? getOwnerEmail(ownerId, token).catch((error) => {
+          console.warn(
+            `[passport-submission] Could not load owner email for deal ${dealId}:`,
+            error instanceof Error ? error.message : error,
+          );
+          return "";
+        })
+      : Promise.resolve("");
 
     const uploaded: Array<{
       fileId: string;
@@ -515,11 +543,13 @@ export async function POST(request: NextRequest) {
 
     const first = uploaded[0]!;
     const fileUrls = uploaded.map((file) => file.fileUrl);
+    const ownersEmail = await ownersEmailPromise;
     return NextResponse.json({
       success: true,
       dealId,
       dealName,
       dealUrl,
+      ownersEmail,
       passportCount: uploaded.length,
       fileUrls,
       fileUrlsText: fileUrls.join("\n"),
