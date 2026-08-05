@@ -1,3 +1,5 @@
+import type { DealEmailContextPayload } from "./fetch-deal-email-context";
+
 /** Formstack field IDs for Highview booking form prefill (form 6471647). */
 const FIELD = {
   hubspotDealId: "193986341",
@@ -43,10 +45,73 @@ const PASSENGER_FIELD_IDS = [
 
 const FORM_TYPE_MAP: Record<string, string> = {
   "6471647": "Net Rate + CC Fee",
+  "Net Rate + CC Fee": "Net Rate + CC Fee",
   "Net Rate (NO CC Fee)": "Net Rate (NO CC Fee)",
   "Commission off Published Rate": "Commission off Published Rate",
   "Published Rate + $75 Ticketing Fee": "Published Rate + $75 Ticketing Fee",
 };
+
+const DEFAULT_PENALTIES_BY_FORM_TYPE: Record<string, string> = {
+  "Net Rate + CC Fee":
+    "NON-REFUNDABLE / CHANGES PERMITTED\n\nTHIS IS NONREFUNDABLE. IN CASE OF ANY CANCELATION FROM THE AIRLINE AND THEY GRANT A REFUND AS PER THEIR RULES, A $150 PROCESSING FEE PER PERSON WILL APPLY TO THE REFUND AND THE COMMISSION MUST BE RETURNED PRIOR TO SUBMITTING THE REFUND REQUEST, CC FEES ARE NEVER REFUNDABLE.",
+  "Net Rate (NO CC Fee)":
+    "NON-REFUNDABLE / CHANGES PERMITTED\n\nTHIS IS NONREFUNDABLE. IN CASE OF ANY CANCELATION FROM THE AIRLINE AND THEY GRANT A REFUND AS PER THEIR RULES, A $150 PROCESSING FEE PER PERSON WILL APPLY TO REFUND AND THE COMMISSION MUST BE RETURNED PRIOR SUBMITTING THE REFUND REQUEST, CC FEES ARE NEVER REFUNDABLE.",
+  "Commission off Published Rate": "AS PER PUBLISHED FARE",
+  "Published Rate + $75 Ticketing Fee": "AS PER PUBLISHED FARE",
+};
+
+export type PenaltiesFillMode = "auto" | "manual";
+
+export type PenaltiesResolution = {
+  mode: PenaltiesFillMode;
+  penalties: string;
+  formTypeLabel: string;
+};
+
+export function resolveFormTypeLabel(formType: string | undefined): string {
+  const raw = formType?.trim() ?? "";
+  return FORM_TYPE_MAP[raw] ?? raw;
+}
+
+/** HubSpot `penalties_fill` is "Auto Fill" / "Manual Fill"; empty defaults to auto. */
+export function resolvePenaltiesFillMode(
+  penaltiesFill: string | undefined,
+): PenaltiesFillMode {
+  const normalized = (penaltiesFill ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+
+  if (normalized === "manual" || normalized === "manual fill") {
+    return "manual";
+  }
+
+  return "auto";
+}
+
+export function resolvePenaltiesText(input: {
+  penaltiesFill?: string;
+  formType?: string;
+  hubspotPenalties?: string;
+}): PenaltiesResolution {
+  const formTypeLabel = resolveFormTypeLabel(input.formType);
+  const mode = resolvePenaltiesFillMode(input.penaltiesFill);
+
+  if (mode === "manual") {
+    return {
+      mode,
+      formTypeLabel,
+      penalties: input.hubspotPenalties ?? "",
+    };
+  }
+
+  return {
+    mode,
+    formTypeLabel,
+    penalties: DEFAULT_PENALTIES_BY_FORM_TYPE[formTypeLabel] ?? "",
+  };
+}
 
 const DEFAULT_FORMSTACK_FORM_ID = "6471647";
 
@@ -122,6 +187,37 @@ function parsePassengerNames(reservationDetails: string): string[] {
   return passengers;
 }
 
+/** Maps HubSpot deal-email context into Formstack prefill input. */
+export function dealEmailContextToFormstackInput(
+  ctx: DealEmailContextPayload,
+): GenerateEmailFormstackInput {
+  const { penalties } = resolvePenaltiesText({
+    penaltiesFill: ctx.penaltiesFill,
+    formType: ctx.formType,
+    hubspotPenalties: ctx.Penalties,
+  });
+
+  return {
+    reservationDetails: ctx.reservationDetails,
+    hubspotDealId: ctx.hubspotDealId,
+    penalties,
+    ratePP: ctx.RatePP,
+    contactFirstName: ctx.ContactFirstName,
+    contactLastName: ctx.ContactLastName,
+    contactEmail: ctx.ContactEmail,
+    ownersEmail: ctx.ownersEmail,
+    formType: ctx.formType,
+    issuingFee: ctx.issuingFee,
+    commissionRate: ctx.commissionRate,
+    dealsOnContact: ctx.DealsOnContact,
+    baseFarePP: ctx.BaseFarePP,
+    taxesAndFeesPP: ctx.TaxesAndFeesPP,
+    dealName: ctx.DealName,
+    isFora: ctx.IsFora,
+    gotPassportPictures: ctx.GotPassportPictures,
+  };
+}
+
 /** Maps Zapier / HubSpot webhook body keys into normalized prefill input. */
 export function parseGenerateEmailFormstackInput(
   body: Record<string, unknown>,
@@ -188,8 +284,7 @@ export function buildFormstackPrefillFields(
   const agentName = `${input.contactFirstName ?? ""} ${input.contactLastName ?? ""}`.trim();
   const isFora = input.isFora === "true";
   const hasPassport = input.gotPassportPictures?.toLowerCase() === "yes";
-  const formTypeLabel =
-    FORM_TYPE_MAP[input.formType ?? ""] ?? input.formType ?? "";
+  const formTypeLabel = resolveFormTypeLabel(input.formType);
 
   const passengerFields = PASSENGER_FIELD_IDS.map((fieldId, i) =>
     makeField(fieldId, passengers[i] ?? ""),

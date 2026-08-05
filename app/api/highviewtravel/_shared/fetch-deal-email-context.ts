@@ -1,9 +1,10 @@
-/** HubSpot deal properties used when assembling generateEmailFile input. */
+/** HubSpot deal properties used when assembling the booking-link email. */
 const DEAL_PROPERTIES = [
   "dealname",
   "hubspot_owner_id",
   "reservation_details",
   "penalties",
+  "penalties_fill",
   "passenger_name",
   "commission",
   "form_type",
@@ -28,6 +29,7 @@ export type DealEmailContextPayload = {
   reservationDetails: string;
   hubspotDealId: string;
   Penalties: string;
+  penaltiesFill: string;
   PassengerName: string;
   RatePP: string;
   ContactFirstName: string;
@@ -144,7 +146,7 @@ async function getOwnerEmail(ownerId: string, token: string): Promise<string> {
   return json.email?.trim() ?? "";
 }
 
-/** Replaces Zapier steps 3–9: load deal, contact, company, deal count, and owner. */
+/** Load deal, contact, company, deal count, and owner for the booking-link email. */
 export async function fetchDealEmailContext(
   dealId: string,
 ): Promise<DealEmailContextPayload> {
@@ -205,6 +207,7 @@ export async function fetchDealEmailContext(
     reservationDetails: prop(deal.properties, "reservation_details"),
     hubspotDealId: deal.id,
     Penalties: prop(deal.properties, "penalties"),
+    penaltiesFill: prop(deal.properties, "penalties_fill"),
     PassengerName: prop(deal.properties, "passenger_name"),
     RatePP: prop(deal.properties, "commission"),
     ContactFirstName: prop(contact.properties, "firstname"),

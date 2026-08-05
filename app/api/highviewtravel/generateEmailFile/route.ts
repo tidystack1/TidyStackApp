@@ -2,10 +2,12 @@ import { randomBytes } from "crypto";
 // import { readFile } from "fs/promises";
 // import path from "path";
 import { NextRequest, NextResponse } from "next/server";
+import { fetchDealEmailContext } from "../_shared/fetch-deal-email-context";
 import {
   buildFormstackPrefillFields,
+  dealEmailContextToFormstackInput,
   fetchFormstackPrefilledUrl,
-  parseGenerateEmailFormstackInput,
+  resolvePenaltiesText,
 } from "../_shared/formstack-prefill";
 
 // PNG signature (booking-email-signature.png in this folder) — not embedded in .eml at the moment.
@@ -226,6 +228,27 @@ function buildBookingLinkEml(
   return headers + CRLF;
 }
 
+function parseDealId(body: Record<string, unknown>): string {
+  const direct = body.dealId ?? body.deal_id ?? body.hubspotDealId;
+  if (direct != null && String(direct).trim()) {
+    return String(direct).trim();
+  }
+
+  if (typeof body.info === "string") {
+    try {
+      const info = JSON.parse(body.info) as Record<string, unknown>;
+      const nested = info.dealId ?? info.deal_id ?? info.hubspotDealId;
+      if (nested != null && String(nested).trim()) {
+        return String(nested).trim();
+      }
+    } catch {
+      // ignore malformed info JSON
+    }
+  }
+
+  return "";
+}
+
 // PNG signature — not using at the moment. To re-enable booking-email-signature.png in the .eml:
 // uncomment SIGNATURE_* constants, fs/path imports, loadSignaturePng, toBase64MimeLines, and the
 // POST loader; change buildBookingLinkEml to accept signaturePng: Buffer; use multipart/related
@@ -236,34 +259,51 @@ export async function POST(request: NextRequest) {
     const { token, property } = getConfig();
 
     const body = (await request.json()) as Record<string, unknown>;
-    const parsed = parseGenerateEmailFormstackInput(body);
+    const dealId = parseDealId(body);
 
-    if (!parsed) {
+    if (!dealId) {
+      return NextResponse.json(
+        { error: "Missing required field: dealId" },
+        { status: 400 },
+      );
+    }
+
+    console.log(`[generateEmailFile] Fetching context for deal ${dealId}`);
+    const context = await fetchDealEmailContext(dealId);
+
+    if (!context.reservationDetails.trim()) {
       return NextResponse.json(
         {
-          error:
-            "Invalid payload: require reservationDetails and hubspotDealId",
+          error: "Deal is missing reservation_details",
+          dealId: context.hubspotDealId,
         },
         { status: 400 },
       );
     }
 
+    const penaltiesResolution = resolvePenaltiesText({
+      penaltiesFill: context.penaltiesFill,
+      formType: context.formType,
+      hubspotPenalties: context.Penalties,
+    });
+    const parsed = dealEmailContextToFormstackInput(context);
     const { reservationDetails, hubspotDealId } = parsed;
 
     console.log(
-      `[generateEmailFile] Formstack prefill for deal ${hubspotDealId}`,
+      `[generateEmailFile] Formstack prefill for deal ${hubspotDealId} (penalties ${penaltiesResolution.mode}, form type "${penaltiesResolution.formTypeLabel}")`,
     );
     const prefillFields = buildFormstackPrefillFields(parsed);
     const formLink = await fetchFormstackPrefilledUrl(prefillFields);
 
-    await patchDealProperties(
-      hubspotDealId,
-      {
-        [HUBSPOT_PREFILLED_LINK_PROPERTY]: formLink,
-        [HUBSPOT_SEND_FORM_PROPERTY]: "",
-      },
-      token,
-    );
+    const dealUpdates: Record<string, string> = {
+      [HUBSPOT_PREFILLED_LINK_PROPERTY]: formLink,
+      [HUBSPOT_SEND_FORM_PROPERTY]: "",
+    };
+    if (penaltiesResolution.mode === "auto") {
+      dealUpdates.penalties = penaltiesResolution.penalties;
+    }
+
+    await patchDealProperties(hubspotDealId, dealUpdates, token);
     console.log(
       `[generateEmailFile] Deal ${hubspotDealId}: prefilled_link set, send_form cleared`,
     );
@@ -294,15 +334,27 @@ export async function POST(request: NextRequest) {
       fileId,
       fileUrl,
       property,
+      penaltiesFill: {
+        mode: penaltiesResolution.mode,
+        formType: penaltiesResolution.formTypeLabel,
+        value: penaltiesResolution.penalties,
+      },
+      context,
     });
   } catch (error) {
     console.error("[generateEmailFile] Error:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    const status =
+      message.includes("No contact") || message.includes("No company")
+        ? 404
+        : 500;
+
     return NextResponse.json(
       {
         error: "Failed to generate email file or update HubSpot deal",
-        details: error instanceof Error ? error.message : String(error),
+        details: message,
       },
-      { status: 500 },
+      { status },
     );
   }
 }
