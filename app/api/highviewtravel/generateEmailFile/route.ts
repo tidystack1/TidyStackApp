@@ -228,7 +228,36 @@ function buildBookingLinkEml(
   return headers + CRLF;
 }
 
-function parseDealId(body: Record<string, unknown>): string {
+const SEND_FORM_VALUE = "Send Form";
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function webhookEventsFromBody(body: unknown): Record<string, unknown>[] {
+  if (Array.isArray(body)) {
+    return body.map(asRecord).filter((event): event is Record<string, unknown> => event !== null);
+  }
+
+  const record = asRecord(body);
+  if (!record) return [];
+
+  if (Array.isArray(record.events)) {
+    return record.events
+      .map(asRecord)
+      .filter((event): event is Record<string, unknown> => event !== null);
+  }
+
+  if (record.objectId != null || record.propertyValue != null) {
+    return [record];
+  }
+
+  return [];
+}
+
+function parseDealIdFromLegacyBody(body: Record<string, unknown>): string {
   const direct = body.dealId ?? body.deal_id ?? body.hubspotDealId;
   if (direct != null && String(direct).trim()) {
     return String(direct).trim();
@@ -249,6 +278,30 @@ function parseDealId(body: Record<string, unknown>): string {
   return "";
 }
 
+type IncomingRequest =
+  | { kind: "skip" }
+  | { kind: "deal"; dealId: string }
+  | { kind: "invalid" };
+
+function parseIncomingRequest(body: unknown): IncomingRequest {
+  const events = webhookEventsFromBody(body);
+  if (events.length > 0) {
+    const match = events.find(
+      (event) => String(event.propertyValue ?? "").trim() === SEND_FORM_VALUE,
+    );
+    if (!match) return { kind: "skip" };
+
+    const dealId = String(match.objectId ?? "").trim();
+    return dealId ? { kind: "deal", dealId } : { kind: "invalid" };
+  }
+
+  const record = asRecord(body);
+  if (!record) return { kind: "invalid" };
+
+  const dealId = parseDealIdFromLegacyBody(record);
+  return dealId ? { kind: "deal", dealId } : { kind: "invalid" };
+}
+
 // PNG signature — not using at the moment. To re-enable booking-email-signature.png in the .eml:
 // uncomment SIGNATURE_* constants, fs/path imports, loadSignaturePng, toBase64MimeLines, and the
 // POST loader; change buildBookingLinkEml to accept signaturePng: Buffer; use multipart/related
@@ -256,17 +309,29 @@ function parseDealId(body: Record<string, unknown>): string {
 // Content-ID matching <img src="cid:..."> in HTML (see git history for full implementation).
 export async function POST(request: NextRequest) {
   try {
-    const { token, property } = getConfig();
+    const body: unknown = await request.json();
+    const incoming = parseIncomingRequest(body);
 
-    const body = (await request.json()) as Record<string, unknown>;
-    const dealId = parseDealId(body);
+    if (incoming.kind === "skip") {
+      console.log(
+        '[generateEmailFile] Ignoring webhook: propertyValue is not "Send Form"',
+      );
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        reason: 'propertyValue is not "Send Form"',
+      });
+    }
 
-    if (!dealId) {
+    if (incoming.kind === "invalid") {
       return NextResponse.json(
-        { error: "Missing required field: dealId" },
+        { error: 'Missing required field: objectId with propertyValue "Send Form"' },
         { status: 400 },
       );
     }
+
+    const { dealId } = incoming;
+    const { token, property } = getConfig();
 
     console.log(`[generateEmailFile] Fetching context for deal ${dealId}`);
     const context = await fetchDealEmailContext(dealId);

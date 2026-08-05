@@ -25,11 +25,20 @@ No `maxDuration` override — uses the project default (5 minutes).
 
 ## Request
 
+HubSpot `deal.propertyChange` webhook (array). Only `objectId` (deal id) and `propertyValue` are used. Processing continues only when `propertyValue` is exactly `Send Form`.
+
 ```json
-{ "dealId": "61244792214" }
+[
+  {
+    "objectId": 63434094704,
+    "propertyValue": "Send Form"
+  }
+]
 ```
 
-Also accepts `deal_id`, `hubspotDealId`, or `dealId` nested inside a stringified `info` field (Zapier-style).
+If `propertyValue` is anything else (including `""` when this route clears `send_form`), the endpoint returns `200` with `"skipped": true` and does no work.
+
+Legacy body `{ "dealId": "..." }` (also `deal_id`, `hubspotDealId`, or `info`) still works for manual testing.
 
 **Required env**
 
@@ -91,7 +100,8 @@ Default text:
 
 | Situation | HTTP status |
 |-----------|-------------|
-| Missing `dealId` | 400 |
+| Webhook `propertyValue` is not `Send Form` | 200 (`skipped: true`) |
+| Missing `objectId` / `dealId` | 400 |
 | Deal has empty `reservation_details` | 400 |
 | No contact on deal | 404 |
 | No company on contact | 404 |
@@ -99,13 +109,6 @@ Default text:
 
 Company **name** may be empty if the HubSpot token lacks `crm.objects.companies.read`; `companyId` is still returned.
 
-## Zapier wiring
+## HubSpot wiring
 
-```
-Trigger
-  → Webhooks by Zapier → POST generateEmailFile   (send dealId only)
-```
-
-Remove the old `get-info-for-email-file` step. That route no longer exists.
-
-**Caller timeout:** Zapier’s webhook action still waits only ~30s for a response, even though Vercel can run for 5 minutes. If the Zap errors with a timeout while HubSpot still gets the file and prefilled link, the work likely finished on the server — check the deal before retrying (retries will upload another `.eml`).
+Subscribe this URL to deal `send_form` property changes. Agent sets **Send Form** → this route runs → it clears `send_form` → HubSpot may fire again with `propertyValue: ""`, which is ignored.
