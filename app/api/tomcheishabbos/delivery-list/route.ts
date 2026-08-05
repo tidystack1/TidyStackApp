@@ -234,12 +234,67 @@ function hasBoxSize(record: SmartSuiteRecord): boolean {
   return Boolean(coerceDisplayText(record[BOX_SIZE_FIELD_ID]));
 }
 
+const UNASSIGNED_ROUTE = "Unassigned Route";
+
+function normalizeRouteName(raw: string): string {
+  const route = raw.trim();
+  if (!route || route.toLowerCase() === UNASSIGNED_ROUTE.toLowerCase()) {
+    return UNASSIGNED_ROUTE;
+  }
+  return route.toUpperCase();
+}
+
+function parseRoute(route: string): {
+  numeric: boolean;
+  number: number;
+  suffix: string;
+} {
+  const match = /^(\d+)(.*)$/.exec(route);
+  if (match) {
+    return {
+      numeric: true,
+      number: Number(match[1]),
+      suffix: match[2],
+    };
+  }
+  return { numeric: false, number: 0, suffix: route };
+}
+
+function compareRoutes(a: string, b: string): number {
+  if (a === UNASSIGNED_ROUTE && b === UNASSIGNED_ROUTE) return 0;
+  if (a === UNASSIGNED_ROUTE) return 1;
+  if (b === UNASSIGNED_ROUTE) return -1;
+
+  const parsedA = parseRoute(a);
+  const parsedB = parseRoute(b);
+
+  if (parsedA.numeric !== parsedB.numeric) {
+    return parsedA.numeric ? -1 : 1;
+  }
+
+  if (parsedA.numeric && parsedB.numeric) {
+    if (parsedA.number !== parsedB.number) {
+      return parsedA.number - parsedB.number;
+    }
+    return parsedA.suffix.localeCompare(parsedB.suffix, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
+
+  return a.localeCompare(b, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
 function groupRecordsByRoute(records: SmartSuiteRecord[]): GroupedRecords {
   const grouped: GroupedRecords = {};
 
   records.forEach((record) => {
-    const route =
-      coerceDisplayText(record[ROUTE_NUMBER_FIELD_ID]) || "Unassigned Route";
+    const route = normalizeRouteName(
+      coerceDisplayText(record[ROUTE_NUMBER_FIELD_ID]),
+    );
     if (!grouped[route]) {
       grouped[route] = [];
     }
@@ -421,7 +476,7 @@ async function generateDeliveryListPDF(
 ): Promise<Buffer> {
   const pdfDoc = await PDFDocument.create();
 
-  const routes = Object.keys(groupedRecords).sort();
+  const routes = Object.keys(groupedRecords).sort(compareRoutes);
   const totalRecords = routes.reduce(
     (sum, route) => sum + groupedRecords[route].length,
     0,
