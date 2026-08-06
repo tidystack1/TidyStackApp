@@ -1,6 +1,10 @@
 import { del, issueSignedToken, presignUrl } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
+import { extractContactFromEmail } from "../../highviewtravel/_shared/extract-contact-from-email";
+import { ensureHubSpotContactFromEmail } from "../../highviewtravel/_shared/hubspot-contact";
+import { parseMsg } from "../../highviewtravel/_shared/parse-msg";
 import {
+  CATEGORY_HIGHVIEW_CONTACT,
   CATEGORY_HUBSPOT_DEAL,
   isRegisteredCategory,
   REGISTERED_CATEGORIES,
@@ -10,11 +14,14 @@ import {
   verifyPluginSharedSecret,
 } from "../_shared/verify-plugin-shared-secret";
 
+export const maxDuration = 120;
+
 const EMAIL_TO_DEAL_MSG_PATH = "/api/highviewtravel/email-to-deal/msg";
 const READ_URL_TTL_MS = 10 * 60 * 1000;
 const BLOB_CHECK_TIMEOUT_MS = 30_000;
 const LOGGING_WEBHOOK_TIMEOUT_MS = 10_000;
 const FORWARD_TIMEOUT_MS = 240_000;
+const MSG_DOWNLOAD_TIMEOUT_MS = 60_000;
 
 /** OLE/CFBF compound files (including .msg) start with this signature. */
 function looksLikeMsgBuffer(buffer: Buffer): boolean {
@@ -218,6 +225,62 @@ async function forwardToEmailToDealMsg(
   return { payload, status: upstream.status };
 }
 
+async function downloadMsgBuffer(msgUrl: string): Promise<Buffer> {
+  const res = await fetch(msgUrl, {
+    signal: AbortSignal.timeout(MSG_DOWNLOAD_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `Failed to download .msg from blob (${res.status}): ${text.slice(0, 300)}`,
+    );
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Inline HighView contact flow (no internal API hop): parse .msg, AI-extract
+ * phone/name from text only, then create HubSpot contact if sender is new.
+ */
+async function processHighViewContact(msgUrl: string): Promise<{
+  payload: Record<string, unknown>;
+  status: number;
+}> {
+  const rawMsg = await timed("downloadMsgBuffer", () =>
+    downloadMsgBuffer(msgUrl),
+  );
+  console.info(
+    `[send-msg-file/process] highview-contact msgBytes=${rawMsg.length} (~${(rawMsg.length / (1024 * 1024)).toFixed(2)}MB)`,
+  );
+
+  const parsed = await timed("parseMsg", async () => parseMsg(rawMsg));
+  console.info(
+    `[send-msg-file/process] highview-contact plainTextLen=${parsed.plainText.length} subjectLen=${parsed.subject.length}`,
+  );
+
+  const extraction = await timed("extractContactFromEmail", () =>
+    extractContactFromEmail(parsed),
+  );
+
+  const contact = await timed("ensureHubSpotContactFromEmail", () =>
+    ensureHubSpotContactFromEmail(parsed.from, extraction),
+  );
+
+  return {
+    status: 200,
+    payload: {
+      success: true,
+      contactEmail: contact.contactEmail,
+      contactId: contact.contactId,
+      created: contact.created,
+      skippedExisting: contact.skippedExisting,
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      phoneNumber: contact.phoneNumber,
+    },
+  };
+}
+
 async function deleteUploadedMsgBlob(pathname: string): Promise<void> {
   try {
     await del(pathname);
@@ -281,7 +344,10 @@ export async function POST(request: NextRequest) {
     );
     const filename = filenameFromPathname(pathname);
 
-    if (category === CATEGORY_HUBSPOT_DEAL) {
+    if (
+      category === CATEGORY_HUBSPOT_DEAL ||
+      category === CATEGORY_HIGHVIEW_CONTACT
+    ) {
       // TEMP logging only — remove before going live.
       console.info(
         "[send-msg-file/process] starting logSupportedCategoryRequest",
@@ -293,10 +359,28 @@ export async function POST(request: NextRequest) {
           ...(triggeredBy !== undefined ? { triggeredBy } : {}),
         }),
       );
+    }
 
+    if (category === CATEGORY_HUBSPOT_DEAL) {
       console.info("[send-msg-file/process] starting forwardToEmailToDealMsg");
       const { payload, status } = await timed("forwardToEmailToDealMsg", () =>
         forwardToEmailToDealMsg(request, msgUrl),
+      );
+      if (status >= 200 && status < 300) {
+        await timed("deleteUploadedMsgBlob", () =>
+          deleteUploadedMsgBlob(pathname),
+        );
+      }
+      console.info(
+        `[send-msg-file/process] total: ${Date.now() - requestStart}ms (status=${status})`,
+      );
+      return jsonResponse(payload, true, status);
+    }
+
+    if (category === CATEGORY_HIGHVIEW_CONTACT) {
+      console.info("[send-msg-file/process] starting processHighViewContact");
+      const { payload, status } = await timed("processHighViewContact", () =>
+        processHighViewContact(msgUrl),
       );
       if (status >= 200 && status < 300) {
         await timed("deleteUploadedMsgBlob", () =>
@@ -333,7 +417,8 @@ export async function POST(request: NextRequest) {
     const isClientError =
       message.includes("Missing") ||
       message.includes("Invalid") ||
-      message.includes("does not look like");
+      message.includes("does not look like") ||
+      message.includes("Could not extract a contact email address");
 
     return NextResponse.json(
       {
