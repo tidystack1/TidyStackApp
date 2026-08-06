@@ -22,6 +22,8 @@ const BLOB_CHECK_TIMEOUT_MS = 30_000;
 const LOGGING_WEBHOOK_TIMEOUT_MS = 10_000;
 const FORWARD_TIMEOUT_MS = 240_000;
 const MSG_DOWNLOAD_TIMEOUT_MS = 60_000;
+/** Outlook add-in often calls process before the Blob PUT finishes; wait first to avoid 404s. */
+const BLOB_READY_INITIAL_WAIT_MS = 4_000;
 
 /** OLE/CFBF compound files (including .msg) start with this signature. */
 function looksLikeMsgBuffer(buffer: Buffer): boolean {
@@ -95,11 +97,20 @@ async function createMsgReadUrl(pathname: string): Promise<string> {
   return presignedUrl;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Confirms the blob exists and looks like a .msg without buffering the whole file. */
 async function assertMsgBlobReady(
   pathname: string,
   readUrl: string,
 ): Promise<void> {
+  console.info(
+    `[send-msg-file/process] Waiting ${BLOB_READY_INITIAL_WAIT_MS}ms for Blob PUT to finish`,
+  );
+  await sleep(BLOB_READY_INITIAL_WAIT_MS);
+
   const res = await fetch(readUrl, {
     headers: { Range: "bytes=0-7" },
     signal: AbortSignal.timeout(BLOB_CHECK_TIMEOUT_MS),
