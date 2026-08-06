@@ -285,6 +285,7 @@ async function processHighViewContact(msgUrl: string): Promise<{
       contactId: contact.contactId,
       created: contact.created,
       skippedExisting: contact.skippedExisting,
+      marketingOptedIn: contact.marketingOptedIn,
       firstName: contact.firstName,
       lastName: contact.lastName,
       phoneNumber: contact.phoneNumber,

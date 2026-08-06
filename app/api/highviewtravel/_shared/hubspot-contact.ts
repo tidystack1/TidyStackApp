@@ -1,6 +1,10 @@
 import type { ContactExtraction } from "./extract-contact-from-email";
 import { extractEmailAddress } from "./hubspot-deal";
 
+/** Same HubSpot automation webhook Zapier used to opt contacts into marketing. */
+const MARKETING_OPT_IN_WEBHOOK_URL =
+  "https://api-na1.hubapi.com/automation/v4/webhook-triggers/20596122/FRFnigz";
+const MARKETING_OPT_IN_TIMEOUT_MS = 15_000;
 function getHubSpotToken(): string {
   const token = process.env.HIGHVIEWTRAVEL_HUBSPOT_ACCESS_TOKEN;
   if (!token) {
@@ -62,11 +66,31 @@ function buildContactProperties(
   email: string,
   extraction: ContactExtraction,
 ): Record<string, string> {
-  const properties: Record<string, string> = { email };
+  const properties: Record<string, string> = {
+    email,
+    contact_type: "Client",
+  };
   if (extraction.firstName) properties.firstname = extraction.firstName;
   if (extraction.lastName) properties.lastname = extraction.lastName;
   if (extraction.phoneNumber) properties.phone = extraction.phoneNumber;
   return properties;
+}
+
+/** Opt a contact into marketing via HubSpot automation webhook (Zapier step 4). */
+async function optInContactToMarketing(contactId: string): Promise<void> {
+  const res = await fetch(MARKETING_OPT_IN_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hs_object_id: contactId }),
+    signal: AbortSignal.timeout(MARKETING_OPT_IN_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `HubSpot marketing opt-in webhook failed (${res.status}): ${text.slice(0, 300)}`,
+    );
+  }
 }
 
 export type EnsureContactResult = {
@@ -74,6 +98,7 @@ export type EnsureContactResult = {
   contactId: string | null;
   created: boolean;
   skippedExisting: boolean;
+  marketingOptedIn: boolean;
   firstName: string | null;
   lastName: string | null;
   phoneNumber: string | null;
@@ -102,6 +127,7 @@ export async function ensureHubSpotContactFromEmail(
       contactId: existingId,
       created: false,
       skippedExisting: true,
+      marketingOptedIn: false,
       firstName: extraction.firstName,
       lastName: extraction.lastName,
       phoneNumber: extraction.phoneNumber,
@@ -120,12 +146,14 @@ export async function ensureHubSpotContactFromEmail(
   }
 
   const json = (await res.json()) as { id: string };
+  await optInContactToMarketing(json.id);
 
   return {
     contactEmail,
     contactId: json.id,
     created: true,
     skippedExisting: false,
+    marketingOptedIn: true,
     firstName: extraction.firstName,
     lastName: extraction.lastName,
     phoneNumber: extraction.phoneNumber,

@@ -26,7 +26,7 @@ const CONTACT_JSON_SCHEMA = {
       phoneNumber: {
         type: ["string", "null"],
         description:
-          "Best phone number for the sender. Prefer toll-free (800/888/877/866/855/844/833). Check the signature. Null if none found.",
+          "The phone number from the email signature. Just the number, nothing else. Example: (555) 742-1983. Prefer direct/mobile over toll-free. Null if none found.",
       },
     },
     required: ["firstName", "lastName", "phoneNumber"],
@@ -39,7 +39,7 @@ const SYSTEM_PROMPT = `You extract contact details from a travel-agency email so
 Rules:
 - Use the From header and the email body/signature. Do not invent values.
 - firstName / lastName: prefer the sender's personal name (From display name or signature). Ignore company names for these fields when a person name is present.
-- phoneNumber: find the sender's phone in the body or signature. Prefer a toll-free number (US/Canada 800, 888, 877, 866, 855, 844, 833) when multiple numbers exist. Otherwise pick the primary business/mobile number. Return digits with optional leading + and separators as written (or a clean normalized form). Null if no phone is found.
+- phoneNumber: the phone number from the email signature. Just the number, nothing else. Example output: (555) 742-1983. If multiple phone numbers exist in the signature, prefer the direct or mobile number over any toll-free number (toll-free numbers typically start with 800, 888, 877, 866, 855, 844, 833). If only a toll-free number exists, return that. Null if no phone is found.
 - Always include every field. Use null when missing or unknown.`;
 
 const MAX_PROMPT_CHARS = 24_000;
