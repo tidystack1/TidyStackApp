@@ -364,9 +364,6 @@ export async function POST(request: NextRequest) {
       [HUBSPOT_PREFILLED_LINK_PROPERTY]: formLink,
       [HUBSPOT_SEND_FORM_PROPERTY]: "",
     };
-    if (penaltiesResolution.mode === "auto") {
-      dealUpdates.penalties = penaltiesResolution.penalties;
-    }
 
     await patchDealProperties(hubspotDealId, dealUpdates, token);
     console.log(

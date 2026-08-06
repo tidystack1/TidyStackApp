@@ -73,7 +73,7 @@ export function resolveFormTypeLabel(formType: string | undefined): string {
   return FORM_TYPE_MAP[raw] ?? raw;
 }
 
-/** HubSpot `penalties_fill` is "Auto Fill" / "Manual Fill"; empty defaults to auto. */
+/** HubSpot `penalties_fill` is "Auto Fill" / "Manual Fill"; empty is treated as Manual Fill. */
 export function resolvePenaltiesFillMode(
   penaltiesFill: string | undefined,
 ): PenaltiesFillMode {
@@ -83,11 +83,12 @@ export function resolvePenaltiesFillMode(
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ");
 
-  if (normalized === "manual" || normalized === "manual fill") {
-    return "manual";
+  if (normalized === "auto" || normalized === "auto fill") {
+    return "auto";
   }
 
-  return "auto";
+  // Empty or Manual Fill: leave HubSpot penalties as-is; Formstack gets existing value.
+  return "manual";
 }
 
 export function resolvePenaltiesText(input: {
