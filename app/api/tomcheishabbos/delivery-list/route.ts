@@ -260,6 +260,17 @@ function parseRoute(route: string): {
   return { numeric: false, number: 0, suffix: route };
 }
 
+function routeSortGroup(parsed: {
+  numeric: boolean;
+  number: number;
+  suffix: string;
+}): number {
+  // 0 = pure numbers (1, 2, 3), 1 = numbers with letters (1A, 3B), 2 = letters only (BSH)
+  if (!parsed.numeric) return 2;
+  if (!parsed.suffix) return 0;
+  return 1;
+}
+
 function compareRoutes(a: string, b: string): number {
   if (a === UNASSIGNED_ROUTE && b === UNASSIGNED_ROUTE) return 0;
   if (a === UNASSIGNED_ROUTE) return 1;
@@ -268,8 +279,10 @@ function compareRoutes(a: string, b: string): number {
   const parsedA = parseRoute(a);
   const parsedB = parseRoute(b);
 
-  if (parsedA.numeric !== parsedB.numeric) {
-    return parsedA.numeric ? -1 : 1;
+  const groupA = routeSortGroup(parsedA);
+  const groupB = routeSortGroup(parsedB);
+  if (groupA !== groupB) {
+    return groupA - groupB;
   }
 
   if (parsedA.numeric && parsedB.numeric) {
