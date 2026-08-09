@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 const SMARTSUITE_API_BASE = "https://app.smartsuite.com/api/v1";
 const CUSTOMERS_TABLE_ID = "6925a5e5faf422df3f931169";
 const PAUSE_UNTIL_FIELD_ID = "sf07be7c13";
+const STATUS_FIELD_ID = "s816f4c4ee";
+const STATUS_PAUSED_VALUE_ID = "UJdvw";
 
 const PAUSE_TYPES = ["6-weeks", "rosh-hashana"] as const;
 type PauseType = (typeof PAUSE_TYPES)[number];
@@ -109,6 +111,7 @@ async function setPauseUntil({
           date: `${pauseUntilDate}T00:00:00.000Z`,
           include_time: false,
         },
+        [STATUS_FIELD_ID]: STATUS_PAUSED_VALUE_ID,
       }),
     },
   );
