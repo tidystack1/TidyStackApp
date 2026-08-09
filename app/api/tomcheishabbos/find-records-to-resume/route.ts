@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 const SMARTSUITE_API_BASE = "https://app.smartsuite.com/api/v1";
+const CUSTOMERS_TABLE_ID = "6925a5e5faf422df3f931169";
 
 const PAUSE_UNTIL_FIELD_ID = "sf07be7c13";
 const STATUS_FIELD_ID = "s816f4c4ee";
@@ -145,12 +146,11 @@ async function setRecordStatusActive({
 async function resumePausedRecords() {
   const apiKey = requireEnv("TOMCHEI_SHABBOS_SMARTSUITE_API_KEY");
   const accountId = requireEnv("TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID");
-  const tableId = requireEnv("TOMCHEI_SHABBOS_SMARTSUITE_TABLE_ID");
 
   const records = await findRecordsPausedUntilToday({
     apiKey,
     accountId,
-    tableId,
+    tableId: CUSTOMERS_TABLE_ID,
   });
 
   const updatedIds: string[] = [];
@@ -161,7 +161,7 @@ async function resumePausedRecords() {
       await setRecordStatusActive({
         apiKey,
         accountId,
-        tableId,
+        tableId: CUSTOMERS_TABLE_ID,
         recordId: record.id,
       });
       updatedIds.push(record.id);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const SMARTSUITE_API_BASE = "https://app.smartsuite.com/api/v1";
+const CUSTOMERS_TABLE_ID = "6925a5e5faf422df3f931169";
 const PAUSE_UNTIL_FIELD_ID = "sf07be7c13";
 
 const PAUSE_TYPES = ["6-weeks", "rosh-hashana"] as const;
@@ -156,12 +157,11 @@ export async function POST(request: NextRequest) {
     const pauseUntilDate = await resolvePauseUntilDate(type);
     const apiKey = requireEnv("TOMCHEI_SHABBOS_SMARTSUITE_API_KEY");
     const accountId = requireEnv("TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID");
-    const tableId = requireEnv("TOMCHEI_SHABBOS_SMARTSUITE_TABLE_ID");
 
     await setPauseUntil({
       apiKey,
       accountId,
-      tableId,
+      tableId: CUSTOMERS_TABLE_ID,
       recordId: id.trim(),
       pauseUntilDate,
     });
