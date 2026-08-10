@@ -315,14 +315,20 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
       const kt      = str(data, `Passenger ${i} Known Traveler #`);
       const airline = str(data, `Passenger ${i} Airline`);
       const special = str(data, `Passenger ${i} Special Requests`);
+      const legalName = str(data, `Passenger ${i} Legal Name`);
+      const birthDate = str(data, `Passenger ${i} Birth Date`);
+      const gender = str(data, `Passenger ${i} Gender`);
 
       if (seat)    ctx = drawLabelValue(ctx, "Seat Preference:", seat,    { indent: 12 });
       if (ff)      ctx = drawLabelValue(ctx, "Frequent Flyer #:", ff,     { indent: 12 });
       if (kt)      ctx = drawLabelValue(ctx, "Known Traveler #:", kt,     { indent: 12 });
       if (airline) ctx = drawLabelValue(ctx, "Airline:", airline,          { indent: 12 });
       if (special) ctx = drawLabelValue(ctx, "Special Requests:", special, { indent: 12 });
+      if (legalName) ctx = drawLabelValue(ctx, "Name:", legalName, { indent: 12 });
+      if (birthDate) ctx = drawLabelValue(ctx, "Birth Date:", birthDate, { indent: 12 });
+      if (gender) ctx = drawLabelValue(ctx, "Gender:", gender, { indent: 12 });
 
-      if (!seat && !ff && !kt && !airline && !special) {
+      if (!seat && !ff && !kt && !airline && !special && !legalName && !birthDate && !gender) {
         ctx = drawLabelValue(ctx, "", "No additional details provided.", { indent: 12 });
       }
 
@@ -740,11 +746,17 @@ export async function buildFormstackDefaultDataStylePDF(
       const kt = str(data, `Passenger ${i} Known Traveler #`);
       const airline = str(data, `Passenger ${i} Airline`);
       const special = str(data, `Passenger ${i} Special Requests`);
+      const legalName = str(data, `Passenger ${i} Legal Name`);
+      const birthDate = str(data, `Passenger ${i} Birth Date`);
+      const gender = str(data, `Passenger ${i} Gender`);
       if (seat) ctx = fsDrawTwoColumnRow(ctx, "Seat Preference", seat);
       if (ff) ctx = fsDrawTwoColumnRow(ctx, "Frequent Flyer #", ff);
       if (kt) ctx = fsDrawTwoColumnRow(ctx, "Known Traveler #", kt);
       if (airline) ctx = fsDrawTwoColumnRow(ctx, "Airline", airline);
       if (special) ctx = fsDrawTwoColumnRow(ctx, "Special Requests", special);
+      if (legalName) ctx = fsDrawTwoColumnRow(ctx, "Name", legalName);
+      if (birthDate) ctx = fsDrawTwoColumnRow(ctx, "Birth Date", birthDate);
+      if (gender) ctx = fsDrawTwoColumnRow(ctx, "Gender", gender);
     }
   }
 

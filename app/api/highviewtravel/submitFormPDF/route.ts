@@ -328,11 +328,17 @@ function buildEmailHtml(
     const kt = str(data, `Passenger ${i} Known Traveler #`);
     const airline = str(data, `Passenger ${i} Airline`);
     const special = str(data, `Passenger ${i} Special Requests`);
+    const legalName = str(data, `Passenger ${i} Legal Name`);
+    const birthDate = str(data, `Passenger ${i} Birth Date`);
+    const gender = str(data, `Passenger ${i} Gender`);
     if (seat) details.push(row("Seat Preference", seat));
     if (ff) details.push(row("Frequent Flyer #", ff));
     if (kt) details.push(row("Known Traveler #", kt));
     if (airline) details.push(row("Airline", airline));
     if (special) details.push(row("Special Requests", special));
+    if (legalName) details.push(row("Name", legalName));
+    if (birthDate) details.push(row("Birth Date", birthDate));
+    if (gender) details.push(row("Gender", gender));
     if (details.length === 0)
       details.push(row("Details", "No additional details provided."));
     passengerSections.push(section(passengerLabel, details.join("")));
