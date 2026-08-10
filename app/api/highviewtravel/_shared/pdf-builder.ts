@@ -315,7 +315,9 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
       const kt      = str(data, `Passenger ${i} Known Traveler #`);
       const airline = str(data, `Passenger ${i} Airline`);
       const special = str(data, `Passenger ${i} Special Requests`);
-      const legalName = str(data, `Passenger ${i} Legal Name`);
+      const firstName = str(data, `Passenger ${i} First Name`);
+      const middleName = str(data, `Passenger ${i} Middle Name`);
+      const lastName = str(data, `Passenger ${i} Last Name`);
       const birthDate = str(data, `Passenger ${i} Birth Date`);
       const gender = str(data, `Passenger ${i} Gender`);
 
@@ -324,11 +326,24 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
       if (kt)      ctx = drawLabelValue(ctx, "Known Traveler #:", kt,     { indent: 12 });
       if (airline) ctx = drawLabelValue(ctx, "Airline:", airline,          { indent: 12 });
       if (special) ctx = drawLabelValue(ctx, "Special Requests:", special, { indent: 12 });
-      if (legalName) ctx = drawLabelValue(ctx, "Name:", legalName, { indent: 12 });
+      if (firstName) ctx = drawLabelValue(ctx, "First Name:", firstName, { indent: 12 });
+      if (middleName) ctx = drawLabelValue(ctx, "Middle Name:", middleName, { indent: 12 });
+      if (lastName) ctx = drawLabelValue(ctx, "Last Name:", lastName, { indent: 12 });
       if (birthDate) ctx = drawLabelValue(ctx, "Birth Date:", birthDate, { indent: 12 });
       if (gender) ctx = drawLabelValue(ctx, "Gender:", gender, { indent: 12 });
 
-      if (!seat && !ff && !kt && !airline && !special && !legalName && !birthDate && !gender) {
+      if (
+        !seat &&
+        !ff &&
+        !kt &&
+        !airline &&
+        !special &&
+        !firstName &&
+        !middleName &&
+        !lastName &&
+        !birthDate &&
+        !gender
+      ) {
         ctx = drawLabelValue(ctx, "", "No additional details provided.", { indent: 12 });
       }
 
@@ -746,7 +761,9 @@ export async function buildFormstackDefaultDataStylePDF(
       const kt = str(data, `Passenger ${i} Known Traveler #`);
       const airline = str(data, `Passenger ${i} Airline`);
       const special = str(data, `Passenger ${i} Special Requests`);
-      const legalName = str(data, `Passenger ${i} Legal Name`);
+      const firstName = str(data, `Passenger ${i} First Name`);
+      const middleName = str(data, `Passenger ${i} Middle Name`);
+      const lastName = str(data, `Passenger ${i} Last Name`);
       const birthDate = str(data, `Passenger ${i} Birth Date`);
       const gender = str(data, `Passenger ${i} Gender`);
       if (seat) ctx = fsDrawTwoColumnRow(ctx, "Seat Preference", seat);
@@ -754,7 +771,9 @@ export async function buildFormstackDefaultDataStylePDF(
       if (kt) ctx = fsDrawTwoColumnRow(ctx, "Known Traveler #", kt);
       if (airline) ctx = fsDrawTwoColumnRow(ctx, "Airline", airline);
       if (special) ctx = fsDrawTwoColumnRow(ctx, "Special Requests", special);
-      if (legalName) ctx = fsDrawTwoColumnRow(ctx, "Name", legalName);
+      if (firstName) ctx = fsDrawTwoColumnRow(ctx, "First Name", firstName);
+      if (middleName) ctx = fsDrawTwoColumnRow(ctx, "Middle Name", middleName);
+      if (lastName) ctx = fsDrawTwoColumnRow(ctx, "Last Name", lastName);
       if (birthDate) ctx = fsDrawTwoColumnRow(ctx, "Birth Date", birthDate);
       if (gender) ctx = fsDrawTwoColumnRow(ctx, "Gender", gender);
     }

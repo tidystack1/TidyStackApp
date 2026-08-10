@@ -317,7 +317,9 @@ export async function buildFormstackDefaultDataStyleDocx(
     const kt = str(data, `Passenger ${i} Known Traveler #`);
     const airline = str(data, `Passenger ${i} Airline`);
     const special = str(data, `Passenger ${i} Special Requests`);
-    const legalName = str(data, `Passenger ${i} Legal Name`);
+    const firstName = str(data, `Passenger ${i} First Name`);
+    const middleName = str(data, `Passenger ${i} Middle Name`);
+    const lastName = str(data, `Passenger ${i} Last Name`);
     const birthDate = str(data, `Passenger ${i} Birth Date`);
     const gender = str(data, `Passenger ${i} Gender`);
     if (seat) passengerRows.push({ label: "Seat Preference", value: seat });
@@ -325,7 +327,9 @@ export async function buildFormstackDefaultDataStyleDocx(
     if (kt) passengerRows.push({ label: "Known Traveler #", value: kt });
     if (airline) passengerRows.push({ label: "Airline", value: airline });
     if (special) passengerRows.push({ label: "Special Requests", value: special });
-    if (legalName) passengerRows.push({ label: "Name", value: legalName });
+    if (firstName) passengerRows.push({ label: "First Name", value: firstName });
+    if (middleName) passengerRows.push({ label: "Middle Name", value: middleName });
+    if (lastName) passengerRows.push({ label: "Last Name", value: lastName });
     if (birthDate) passengerRows.push({ label: "Birth Date", value: birthDate });
     if (gender) passengerRows.push({ label: "Gender", value: gender });
     pushFieldTable(children, passengerRows);

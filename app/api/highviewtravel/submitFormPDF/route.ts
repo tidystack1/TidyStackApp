@@ -328,7 +328,9 @@ function buildEmailHtml(
     const kt = str(data, `Passenger ${i} Known Traveler #`);
     const airline = str(data, `Passenger ${i} Airline`);
     const special = str(data, `Passenger ${i} Special Requests`);
-    const legalName = str(data, `Passenger ${i} Legal Name`);
+    const firstName = str(data, `Passenger ${i} First Name`);
+    const middleName = str(data, `Passenger ${i} Middle Name`);
+    const lastName = str(data, `Passenger ${i} Last Name`);
     const birthDate = str(data, `Passenger ${i} Birth Date`);
     const gender = str(data, `Passenger ${i} Gender`);
     if (seat) details.push(row("Seat Preference", seat));
@@ -336,7 +338,9 @@ function buildEmailHtml(
     if (kt) details.push(row("Known Traveler #", kt));
     if (airline) details.push(row("Airline", airline));
     if (special) details.push(row("Special Requests", special));
-    if (legalName) details.push(row("Name", legalName));
+    if (firstName) details.push(row("First Name", firstName));
+    if (middleName) details.push(row("Middle Name", middleName));
+    if (lastName) details.push(row("Last Name", lastName));
     if (birthDate) details.push(row("Birth Date", birthDate));
     if (gender) details.push(row("Gender", gender));
     if (details.length === 0)
