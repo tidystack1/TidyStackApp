@@ -43,6 +43,11 @@ export function isNetRateForm(data: FormData): boolean {
   return formType === "Net Rate + CC Fee" || formType === "Net Rate (NO CC Fee)";
 }
 
+/** Fare-row label for "+ COMMISSION PP": Markup on Net Rate forms, else Commission PP. */
+export function commissionPPLabel(data: FormData): string {
+  return isNetRateForm(data) ? "Commission Markup PP" : "Commission PP";
+}
+
 /** "How will you pay the fee?" applies to this Form Type. */
 export function isPublishedRateTicketingFeeForm(data: FormData): boolean {
   return str(data, "Form Type") === "Published Rate + $75 Ticketing Fee";
@@ -381,7 +386,7 @@ export async function buildPDF(data: FormData): Promise<Uint8Array> {
   if (isFora  && present(basePerPerson))  ctx = drawLabelValue(ctx, "Base Per Person:", currency(basePerPerson));
   if (isFora  && present(taxesAndFees))   ctx = drawLabelValue(ctx, "Taxes & Fees Per Person:", currency(taxesAndFees));
   if (present(issuingFee))                ctx = drawLabelValue(ctx, "Issuing Fee:", currency(issuingFee));
-  if (present(commissionPP))              ctx = drawLabelValue(ctx, "+ Commission PP:", currency(commissionPP));
+  if (present(commissionPP))              ctx = drawLabelValue(ctx, `+ ${commissionPPLabel(data)}:`, currency(commissionPP));
 
   if (present(totalPerPerson)) {
     ctx = drawHRule(ctx);
@@ -806,7 +811,7 @@ export async function buildFormstackDefaultDataStylePDF(
   if (present(issuingFee))
     ctx = fsDrawTwoColumnRow(ctx, "Issuing Fee", currency(issuingFee));
   if (present(commissionPP))
-    ctx = fsDrawTwoColumnRow(ctx, "+ COMMISSION PP", currency(commissionPP));
+    ctx = fsDrawTwoColumnRow(ctx, `+ ${commissionPPLabel(data).toUpperCase()}`, currency(commissionPP));
   if (present(totalPerPerson))
     ctx = fsDrawTwoColumnRow(ctx, "Total Per Person", currency(totalPerPerson));
   if (isNetRateForm(data) && present(total))

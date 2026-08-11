@@ -4,6 +4,7 @@ import { parseFormPDFBody } from "../_shared/parse-form-body";
 import {
   // buildFormstackDefaultDataStylePDF, // gray “client email” PDF — see commented block in POST
   buildPDF,
+  commissionPPLabel,
   isForaBooking,
   isNetRateForm,
   isNetRateWithCcFeeForm,
@@ -378,7 +379,7 @@ function buildEmailHtml(
   if (present(issuingFee))
     fareRows.push(row("Issuing Fee", currency(issuingFee)));
   if (present(commissionPP))
-    fareRows.push(row("+ Commission PP", currency(commissionPP)));
+    fareRows.push(row(`+ ${commissionPPLabel(data)}`, currency(commissionPP)));
   if (present(totalPerPerson))
     fareRows.push(row("Total Per Person", currency(totalPerPerson)));
   if (isNetRateForm(data) && present(total)) fareRows.push(row("Total", currency(total)));

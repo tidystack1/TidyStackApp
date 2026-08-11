@@ -12,6 +12,7 @@ import {
   WidthType,
 } from "docx";
 import {
+  commissionPPLabel,
   isForaBooking,
   isNetRateForm,
   isNetRateWithCcFeeForm,
@@ -375,7 +376,10 @@ export async function buildFormstackDefaultDataStyleDocx(
   if (present(issuingFee))
     fareRows.push({ label: "Issuing Fee", value: currency(issuingFee) });
   if (present(commissionPP))
-    fareRows.push({ label: "+ COMMISSION PP", value: currency(commissionPP) });
+    fareRows.push({
+      label: `+ ${commissionPPLabel(data).toUpperCase()}`,
+      value: currency(commissionPP),
+    });
   if (present(totalPerPerson))
     fareRows.push({
       label: "Total Per Person",
