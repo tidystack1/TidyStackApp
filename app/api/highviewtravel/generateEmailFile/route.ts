@@ -7,7 +7,6 @@ import {
   buildFormstackPrefillFields,
   dealEmailContextToFormstackInput,
   fetchFormstackPrefilledUrl,
-  resolvePenaltiesText,
 } from "../_shared/formstack-prefill";
 
 // PNG signature (booking-email-signature.png in this folder) — not embedded in .eml at the moment.
@@ -346,16 +345,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const penaltiesResolution = resolvePenaltiesText({
-      penaltiesFill: context.penaltiesFill,
-      formType: context.formType,
-      hubspotPenalties: context.Penalties,
-    });
     const parsed = dealEmailContextToFormstackInput(context);
     const { reservationDetails, hubspotDealId } = parsed;
 
     console.log(
-      `[generateEmailFile] Formstack prefill for deal ${hubspotDealId} (penalties ${penaltiesResolution.mode}, form type "${penaltiesResolution.formTypeLabel}")`,
+      `[generateEmailFile] Formstack prefill for deal ${hubspotDealId}`,
     );
     const prefillFields = buildFormstackPrefillFields(parsed);
     const formLink = await fetchFormstackPrefilledUrl(prefillFields);
@@ -396,11 +390,6 @@ export async function POST(request: NextRequest) {
       fileId,
       fileUrl,
       property,
-      penaltiesFill: {
-        mode: penaltiesResolution.mode,
-        formType: penaltiesResolution.formTypeLabel,
-        value: penaltiesResolution.penalties,
-      },
       context,
     });
   } catch (error) {

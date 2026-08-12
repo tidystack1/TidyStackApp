@@ -51,6 +51,11 @@ const FORM_TYPE_MAP: Record<string, string> = {
   "Published Rate + $75 Ticketing Fee": "Published Rate + $75 Ticketing Fee",
 };
 
+export function resolveFormTypeLabel(formType: string | undefined): string {
+  const raw = formType?.trim() ?? "";
+  return FORM_TYPE_MAP[raw] ?? raw;
+}
+
 const DEFAULT_PENALTIES_BY_FORM_TYPE: Record<string, string> = {
   "Net Rate + CC Fee":
     "NON-REFUNDABLE / CHANGES PERMITTED\n\nTHIS IS NONREFUNDABLE. IN CASE OF ANY CANCELATION FROM THE AIRLINE AND THEY GRANT A REFUND AS PER THEIR RULES, A $150 PROCESSING FEE PER PERSON WILL APPLY TO THE REFUND AND THE COMMISSION MUST BE RETURNED PRIOR TO SUBMITTING THE REFUND REQUEST, CC FEES ARE NEVER REFUNDABLE.",
@@ -60,55 +65,13 @@ const DEFAULT_PENALTIES_BY_FORM_TYPE: Record<string, string> = {
   "Published Rate + $75 Ticketing Fee": "AS PER PUBLISHED FARE",
 };
 
-export type PenaltiesFillMode = "auto" | "manual";
-
-export type PenaltiesResolution = {
-  mode: PenaltiesFillMode;
-  penalties: string;
+/** Default Penalties text for a HubSpot `form_type` value. Empty if the type is unknown. */
+export function defaultPenaltiesForFormType(formType: string | undefined): {
   formTypeLabel: string;
-};
-
-export function resolveFormTypeLabel(formType: string | undefined): string {
-  const raw = formType?.trim() ?? "";
-  return FORM_TYPE_MAP[raw] ?? raw;
-}
-
-/** HubSpot `penalties_fill` is "Auto Fill" / "Manual Fill"; empty is treated as Manual Fill. */
-export function resolvePenaltiesFillMode(
-  penaltiesFill: string | undefined,
-): PenaltiesFillMode {
-  const normalized = (penaltiesFill ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ");
-
-  if (normalized === "auto" || normalized === "auto fill") {
-    return "auto";
-  }
-
-  // Empty or Manual Fill: leave HubSpot penalties as-is; Formstack gets existing value.
-  return "manual";
-}
-
-export function resolvePenaltiesText(input: {
-  penaltiesFill?: string;
-  formType?: string;
-  hubspotPenalties?: string;
-}): PenaltiesResolution {
-  const formTypeLabel = resolveFormTypeLabel(input.formType);
-  const mode = resolvePenaltiesFillMode(input.penaltiesFill);
-
-  if (mode === "manual") {
-    return {
-      mode,
-      formTypeLabel,
-      penalties: input.hubspotPenalties ?? "",
-    };
-  }
-
+  penalties: string;
+} {
+  const formTypeLabel = resolveFormTypeLabel(formType);
   return {
-    mode,
     formTypeLabel,
     penalties: DEFAULT_PENALTIES_BY_FORM_TYPE[formTypeLabel] ?? "",
   };
@@ -192,16 +155,10 @@ function parsePassengerNames(reservationDetails: string): string[] {
 export function dealEmailContextToFormstackInput(
   ctx: DealEmailContextPayload,
 ): GenerateEmailFormstackInput {
-  const { penalties } = resolvePenaltiesText({
-    penaltiesFill: ctx.penaltiesFill,
-    formType: ctx.formType,
-    hubspotPenalties: ctx.Penalties,
-  });
-
   return {
     reservationDetails: ctx.reservationDetails,
     hubspotDealId: ctx.hubspotDealId,
-    penalties,
+    penalties: ctx.Penalties,
     ratePP: ctx.RatePP,
     contactFirstName: ctx.ContactFirstName,
     contactLastName: ctx.ContactLastName,
