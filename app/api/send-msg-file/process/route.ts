@@ -1,7 +1,9 @@
 import { del, issueSignedToken, presignUrl } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
+import { extractBookingFromEmail } from "../../highviewtravel/_shared/extract-booking-from-email";
 import { extractContactFromEmail } from "../../highviewtravel/_shared/extract-contact-from-email";
 import { ensureHubSpotContactFromEmail } from "../../highviewtravel/_shared/hubspot-contact";
+import { createHubSpotDealFromBooking } from "../../highviewtravel/_shared/hubspot-deal";
 import { parseMsg } from "../../highviewtravel/_shared/parse-msg";
 import {
   CATEGORY_HIGHVIEW_CONTACT,
@@ -16,11 +18,16 @@ import {
 
 export const maxDuration = 120;
 
-const EMAIL_TO_DEAL_MSG_PATH = "/api/highviewtravel/email-to-deal/msg";
+/**
+ * HubSpot deal is inlined here the same way as HighView contact: this route
+ * downloads/parses the .msg and creates the deal itself. It no longer forwards
+ * to /api/highviewtravel/email-to-deal/msg (that hop timed out on large files).
+ * TODO: this file is messy — duplicated deal/contact handlers, temp logging
+ * webhook, leftover blob-wait plumbing. Clean up when touching this again.
+ */
 const READ_URL_TTL_MS = 10 * 60 * 1000;
 const BLOB_CHECK_TIMEOUT_MS = 30_000;
 const LOGGING_WEBHOOK_TIMEOUT_MS = 10_000;
-const FORWARD_TIMEOUT_MS = 240_000;
 const MSG_DOWNLOAD_TIMEOUT_MS = 60_000;
 /** Outlook add-in often calls process before the Blob PUT finishes; wait first to avoid 404s. */
 const BLOB_READY_INITIAL_WAIT_MS = 4_000;
@@ -209,33 +216,6 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/**
- * Forward a Blob read URL (not the file bytes) so large .msg files stay under
- * Vercel's ~4.5MB serverless request body limit. Downstream routes download.
- */
-async function forwardToEmailToDealMsg(
-  request: NextRequest,
-  msgUrl: string,
-): Promise<{ payload: unknown; status: number }> {
-  const targetUrl = new URL(EMAIL_TO_DEAL_MSG_PATH, request.url);
-  const upstream = await fetch(targetUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ msgUrl }),
-    signal: AbortSignal.timeout(FORWARD_TIMEOUT_MS),
-  });
-
-  const text = await upstream.text();
-  let payload: unknown;
-  try {
-    payload = JSON.parse(text) as unknown;
-  } catch {
-    payload = { details: text };
-  }
-
-  return { payload, status: upstream.status };
-}
-
 async function downloadMsgBuffer(msgUrl: string): Promise<Buffer> {
   const res = await fetch(msgUrl, {
     signal: AbortSignal.timeout(MSG_DOWNLOAD_TIMEOUT_MS),
@@ -247,6 +227,59 @@ async function downloadMsgBuffer(msgUrl: string): Promise<Buffer> {
     );
   }
   return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Inline HubSpot deal flow (no internal API hop): parse .msg, AI-extract
+ * booking details (text + images), then create a HubSpot deal.
+ */
+async function processHubSpotDeal(msgUrl: string): Promise<{
+  payload: Record<string, unknown>;
+  status: number;
+}> {
+  const rawMsg = await timed("downloadMsgBuffer", () =>
+    downloadMsgBuffer(msgUrl),
+  );
+  console.info(
+    `[send-msg-file/process] hubspot-deal msgBytes=${rawMsg.length} (~${(rawMsg.length / (1024 * 1024)).toFixed(2)}MB)`,
+  );
+
+  const parsed = await timed("parseMsg", async () => parseMsg(rawMsg));
+  console.info(
+    `[send-msg-file/process] hubspot-deal images=${parsed.images.length} subjectLen=${parsed.subject.length} plainTextLen=${parsed.plainText.length}`,
+  );
+
+  const booking = await timed("extractBookingFromEmail", () =>
+    extractBookingFromEmail(parsed),
+  );
+
+  const deal = await timed("createHubSpotDealFromBooking", () =>
+    createHubSpotDealFromBooking(booking, parsed.from, parsed.to),
+  );
+
+  return {
+    status: 200,
+    payload: {
+      success: true,
+      passengerName: booking.passengerName,
+      departureAirport: booking.departureAirport,
+      arrivalAirport: booking.arrivalAirport,
+      outboundDate: booking.outboundDate,
+      returnDate: booking.returnDate,
+      cabinClass: booking.cabinClass,
+      route: booking.route,
+      passengers: booking.passengers,
+      departureRegion: booking.departureRegion,
+      dealId: deal.dealId,
+      dealName: deal.dealName,
+      contactId: deal.contactId,
+      contactEmail: deal.contactEmail,
+      contactAssociated: deal.contactAssociated,
+      ownerId: deal.ownerId,
+      ownerEmail: deal.ownerEmail,
+      ownerAssigned: deal.ownerAssigned,
+    },
+  };
 }
 
 /**
@@ -374,9 +407,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (category === CATEGORY_HUBSPOT_DEAL) {
-      console.info("[send-msg-file/process] starting forwardToEmailToDealMsg");
-      const { payload, status } = await timed("forwardToEmailToDealMsg", () =>
-        forwardToEmailToDealMsg(request, msgUrl),
+      console.info("[send-msg-file/process] starting processHubSpotDeal");
+      const { payload, status } = await timed("processHubSpotDeal", () =>
+        processHubSpotDeal(msgUrl),
       );
       if (status >= 200 && status < 300) {
         await timed("deleteUploadedMsgBlob", () =>
