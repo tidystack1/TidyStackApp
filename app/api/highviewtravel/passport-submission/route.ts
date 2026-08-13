@@ -87,8 +87,11 @@ function fileIndexesFromField(field: unknown): number[] {
   if (urls.length === 0) return [0];
 
   const indexes = urls.map((entry, i) => {
-    const match = /\/(\d+)\/?$/.exec(String(entry).trim());
-    return match ? Number(match[1]) : i;
+    // Only ".../file/{fieldOrFileId}/{slot}" — not a bare file ID at the end of the path.
+    const match = /\/file\/\d+\/(\d+)\/?$/i.exec(String(entry).trim());
+    if (!match) return i;
+    const slot = Number(match[1]);
+    return Number.isInteger(slot) && slot >= 0 && slot < 50 ? slot : i;
   });
 
   return [...new Set(indexes)].sort((a, b) => a - b);
