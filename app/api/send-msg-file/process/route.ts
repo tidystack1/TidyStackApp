@@ -256,6 +256,9 @@ async function processHubSpotDeal(msgUrl: string): Promise<{
   const deal = await timed("createHubSpotDealFromBooking", () =>
     createHubSpotDealFromBooking(booking, parsed.from, parsed.to),
   );
+  console.info(
+    `[send-msg-file/process] hubspot-deal created dealId=${deal.dealId} contactId=${deal.contactId ?? "none"} contactAssociated=${deal.contactAssociated}`,
+  );
 
   return {
     status: 200,
@@ -308,6 +311,9 @@ async function processHighViewContact(msgUrl: string): Promise<{
 
   const contact = await timed("ensureHubSpotContactFromEmail", () =>
     ensureHubSpotContactFromEmail(parsed.from, extraction),
+  );
+  console.info(
+    `[send-msg-file/process] highview-contact ${contact.created ? "created" : contact.skippedExisting ? "existing" : "result"} contactId=${contact.contactId ?? "none"}`,
   );
 
   return {
