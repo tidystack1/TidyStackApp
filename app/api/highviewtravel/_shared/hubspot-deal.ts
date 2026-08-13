@@ -1,58 +1,24 @@
 import type { BookingExtraction } from "./extract-booking-from-email";
 import { buildDealName } from "./build-deal-name";
 
-/** Pending to be reached out — internal stage id from HubSpot deal stage property */
-const HUBSPOT_PENDING_DEAL_STAGE_ID = "46623793";
-
-type HubSpotPipeline = {
-  id: string;
-  label: string;
-  stages: Array<{ id: string; label: string }>;
-};
+/** HubSpot Sales Pipeline — internal name from deal `pipeline` property */
+const HUBSPOT_SALES_PIPELINE_ID = "default";
+/** Pending (Sales Pipeline) — internal name from deal `dealstage` property */
+const HUBSPOT_PENDING_DEAL_STAGE_ID = "1418176129";
 
 type ResolvedPipelineStage = {
   pipelineId: string;
   stageId: string;
 };
 
-let cachedPipelineStage: ResolvedPipelineStage | null = null;
-
-async function fetchDealPipelines(token: string): Promise<HubSpotPipeline[]> {
-  const res = await hubSpotFetch("/crm/v3/pipelines/deals", token);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`HubSpot pipeline lookup failed (${res.status}): ${text}`);
-  }
-
-  const json = (await res.json()) as { results?: HubSpotPipeline[] };
-  return json.results ?? [];
-}
-
-async function resolvePipelineAndStage(token: string): Promise<ResolvedPipelineStage> {
+function resolvePipelineAndStage(): ResolvedPipelineStage {
   const pipelineFromEnv = process.env.HIGHVIEWTRAVEL_HUBSPOT_SALES_PIPELINE_ID?.trim();
   const stageFromEnv = process.env.HIGHVIEWTRAVEL_HUBSPOT_PENDING_DEAL_STAGE_ID?.trim();
-  const stageId = stageFromEnv || HUBSPOT_PENDING_DEAL_STAGE_ID;
 
-  if (pipelineFromEnv) {
-    return { pipelineId: pipelineFromEnv, stageId };
-  }
-
-  if (cachedPipelineStage?.stageId === stageId) {
-    return cachedPipelineStage;
-  }
-
-  const pipelines = await fetchDealPipelines(token);
-  for (const pipeline of pipelines) {
-    const stage = pipeline.stages.find((item) => item.id === stageId);
-    if (stage) {
-      cachedPipelineStage = { pipelineId: pipeline.id, stageId: stage.id };
-      return cachedPipelineStage;
-    }
-  }
-
-  throw new Error(
-    `HubSpot stage ${stageId} was not found in any deal pipeline`,
-  );
+  return {
+    pipelineId: pipelineFromEnv || HUBSPOT_SALES_PIPELINE_ID,
+    stageId: stageFromEnv || HUBSPOT_PENDING_DEAL_STAGE_ID,
+  };
 }
 
 function getHubSpotToken(): string {
@@ -246,7 +212,7 @@ export async function createHubSpotDealFromBooking(
     throw new Error("Could not extract a contact email address from the .eml From header");
   }
 
-  const { pipelineId, stageId } = await resolvePipelineAndStage(token);
+  const { pipelineId, stageId } = resolvePipelineAndStage();
   const { ownerId, ownerEmail } = await resolveOwnerFromToHeader(toHeader, token);
   const properties = buildDealProperties(
     booking,
