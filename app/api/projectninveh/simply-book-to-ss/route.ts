@@ -314,8 +314,6 @@ function isBlank(value: unknown): boolean {
   return false;
 }
 
-// Kept for commented-out Singles create/update.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function pickBlanks(
   existing: Record<string, unknown> | null,
   incoming: Record<string, unknown>,
@@ -472,8 +470,6 @@ async function createRecord({
   return record.id;
 }
 
-// Kept for commented-out Singles create/update.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function updateRecord({
   apiKey,
   accountId,
@@ -597,8 +593,6 @@ async function maybeDownload(
   return downloadFile(fileUrl, filename);
 }
 
-// Kept for commented-out Singles create/update.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function recordHasFiles(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0;
 }
@@ -678,8 +672,6 @@ async function findShadchanId({
   return match && typeof match.id === "string" ? match.id : undefined;
 }
 
-// Kept for commented-out Singles create/update.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function singlesIncomingFields(booking: Record<string, unknown>) {
   const first = nonempty(booking.first_name);
   const last = nonempty(booking.last_name);
@@ -834,72 +826,70 @@ export async function POST(req: NextRequest) {
       last,
     });
 
+    const singlesFields = singlesIncomingFields(booking);
     let singleId: string | undefined;
-    let singleAction: "linked" | "skipped" = "skipped";
+    let singleAction: "created" | "updated" | "linked" | "skipped" = "skipped";
 
     if (existingSingle && typeof existingSingle.id === "string") {
       singleId = existingSingle.id;
-      singleAction = "linked";
+      const blanks = pickBlanks(existingSingle, singlesFields);
+      if (Object.keys(blanks).length) {
+        await updateRecord({
+          apiKey,
+          accountId,
+          tableId: singlesTableId,
+          recordId: singleId,
+          fields: blanks,
+        });
+        singleAction = "updated";
+      } else {
+        singleAction = "linked";
+      }
+    } else if (first || last) {
+      singleId = await createRecord({
+        apiKey,
+        accountId,
+        tableId: singlesTableId,
+        fields: singlesFields,
+      });
+      singleAction = "created";
     }
 
-    // Creating / updating Singles is disabled for now — SimplyBook does not
-    // supply the required Singles-table fields. Lookup + link only.
-    // const singlesFields = singlesIncomingFields(booking);
-    // if (existingSingle && typeof existingSingle.id === "string") {
-    //   const blanks = pickBlanks(existingSingle, singlesFields);
-    //   if (Object.keys(blanks).length) {
-    //     await updateRecord({
-    //       apiKey,
-    //       accountId,
-    //       tableId: singlesTableId,
-    //       recordId: existingSingle.id,
-    //       fields: blanks,
-    //     });
-    //   }
-    // } else if (first || last) {
-    //   singleId = await createRecord({
-    //     apiKey,
-    //     accountId,
-    //     tableId: singlesTableId,
-    //     fields: singlesFields,
-    //   });
-    // }
-    //
-    // if (singleId) {
-    //   const uploads: Array<Promise<void>> = [];
-    //   if (resumeFile && (!existingSingle || !recordHasFiles(existingSingle[SINGLES.resume]))) {
-    //     uploads.push(
-    //       uploadFile({
-    //         apiKey,
-    //         accountId,
-    //         tableId: singlesTableId,
-    //         recordId: singleId,
-    //         fieldId: SINGLES.resume,
-    //         file: resumeFile,
-    //       }),
-    //     );
-    //   }
-    //   if (photoFile && (!existingSingle || !recordHasFiles(existingSingle[SINGLES.photo]))) {
-    //     uploads.push(
-    //       uploadFile({
-    //         apiKey,
-    //         accountId,
-    //         tableId: singlesTableId,
-    //         recordId: singleId,
-    //         fieldId: SINGLES.photo,
-    //         file: photoFile,
-    //       }),
-    //     );
-    //   }
-    //   const results = await Promise.allSettled(uploads);
-    //   for (const result of results) {
-    //     if (result.status === "rejected") {
-    //       warnings.push(
-    //         result.reason instanceof Error ? result.reason.message : String(result.reason),
-    //       );
-    //     }
-    //   }
-    // }
+    if (singleId) {
+      const uploads: Array<Promise<void>> = [];
+      if (resumeFile && (!existingSingle || !recordHasFiles(existingSingle[SINGLES.resume]))) {
+        uploads.push(
+          uploadFile({
+            apiKey,
+            accountId,
+            tableId: singlesTableId,
+            recordId: singleId,
+            fieldId: SINGLES.resume,
+            file: resumeFile,
+          }),
+        );
+      }
+      if (photoFile && (!existingSingle || !recordHasFiles(existingSingle[SINGLES.photo]))) {
+        uploads.push(
+          uploadFile({
+            apiKey,
+            accountId,
+            tableId: singlesTableId,
+            recordId: singleId,
+            fieldId: SINGLES.photo,
+            file: photoFile,
+          }),
+        );
+      }
+      const results = await Promise.allSettled(uploads);
+      for (const result of results) {
+        if (result.status === "rejected") {
+          warnings.push(
+            result.reason instanceof Error ? result.reason.message : String(result.reason),
+          );
+        }
+      }
+    }
 
     const shadchanId = await findShadchanId({
       apiKey,
