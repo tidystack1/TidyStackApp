@@ -558,6 +558,10 @@ async function postToN8n(payload: N8nEmailPayload): Promise<number> {
   return response.status;
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function emailAutomationsCallbackUrl(origin: string, token: string): string {
   return `${origin.replace(/\/$/, "")}/api/aspire/email-automations/run?token=${encodeURIComponent(token)}`;
 }
@@ -571,6 +575,7 @@ async function dispatchToN8n(input: {
   startedAtMs?: number;
   daysElapsed?: number;
   trigger?: "clickup_webhook" | "daily_scan";
+  delayBeforeN8nMs?: number;
 }): Promise<AutomationRunResult> {
   const { task, fields } = await loadClientFields(input.taskId);
   const condition = conditionFor(input.automation);
@@ -628,6 +633,10 @@ async function dispatchToN8n(input: {
       };
     }
     email = built;
+  }
+
+  if (input.delayBeforeN8nMs && input.delayBeforeN8nMs > 0) {
+    await wait(input.delayBeforeN8nMs);
   }
 
   const n8nStatus = await postToN8n({
@@ -882,20 +891,22 @@ export async function scanEmailAutomations(callbackUrl?: string | null): Promise
 }> {
   const { due, unstamped } = await collectDueEmailAutomations();
   const results: AutomationRunResult[] = [];
+  let n8nPosts = 0;
 
   for (const item of due) {
-    results.push(
-      await dispatchToN8n({
-        automation: item.automation,
-        taskId: item.taskId,
-        action: "send_email",
-        callbackUrl,
-        requireCondition: true,
-        startedAtMs: item.startedAtMs,
-        daysElapsed: item.daysElapsed,
-        trigger: "daily_scan",
-      }),
-    );
+    const result = await dispatchToN8n({
+      automation: item.automation,
+      taskId: item.taskId,
+      action: "send_email",
+      callbackUrl,
+      requireCondition: true,
+      startedAtMs: item.startedAtMs,
+      daysElapsed: item.daysElapsed,
+      trigger: "daily_scan",
+      delayBeforeN8nMs: n8nPosts > 0 ? 1000 : 0,
+    });
+    results.push(result);
+    if (!result.skipped) n8nPosts += 1;
   }
 
   return {

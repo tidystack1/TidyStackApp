@@ -11,8 +11,6 @@ import {
 } from "../../_shared/process";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
-
 export async function GET() {
   return NextResponse.json({
     ok: true,
