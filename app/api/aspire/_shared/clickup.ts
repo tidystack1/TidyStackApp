@@ -246,14 +246,17 @@ async function setCustomFields(
 
 async function attachFile(
   taskId: string,
-  file: FileRef,
+  _file: FileRef,
   bytes: Uint8Array,
   filename: string,
 ): Promise<string | null> {
   const form = new FormData();
+  const payload = new Uint8Array(bytes);
   form.append(
     "attachment",
-    new Blob([bytes], { type: "application/octet-stream" }),
+    new Blob([payload.buffer as ArrayBuffer], {
+      type: "application/octet-stream",
+    }),
     filename,
   );
 
