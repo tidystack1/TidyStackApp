@@ -4,7 +4,9 @@ import {
   CLICKUP_ASSESSMENT_STAGE,
   CLICKUP_FIELDS,
   CLICKUP_NO_TECH_STATUS,
+  EMAIL_AUTOMATIONS,
   getAspireN8nWebhookUrl,
+  type EmailAutomationId,
 } from "./config";
 import {
   getClickUpTask,
@@ -12,21 +14,16 @@ import {
   type ClickUpTaskCustomField,
 } from "./clickup";
 import type { JsonObject } from "./types";
+import {
+  collectDueEmailAutomations,
+  ensureAutomationFieldIds,
+  markAutomationSent,
+  readScheduleState,
+  stampNoTechStart,
+  stampWaitingListStart,
+} from "./email-schedule";
 
-export const EMAIL_AUTOMATIONS = {
-  waitingListDay0: "waiting_list_day_0",
-  waitingListDay10: "waiting_list_day_10",
-  waitingListDay20: "waiting_list_day_20",
-  waitingListDay30: "waiting_list_day_30",
-  bcbaAssigned: "bcba_assigned",
-  noTechDay15: "no_tech_day_15",
-  noTechDay20: "no_tech_day_20",
-  noTechDay25: "no_tech_day_25",
-  noTechAssigned: "no_tech_assigned",
-} as const;
-
-export type EmailAutomationId =
-  (typeof EMAIL_AUTOMATIONS)[keyof typeof EMAIL_AUTOMATIONS];
+export { EMAIL_AUTOMATIONS, type EmailAutomationId };
 
 type FollowUp = {
   automation: EmailAutomationId;
@@ -50,6 +47,9 @@ export type N8nEmailPayload = {
   automation: EmailAutomationId;
   taskId: string;
   taskUrl: string;
+  trigger: "clickup_webhook" | "daily_scan";
+  startedAt: string | null;
+  daysElapsed: number | null;
   email: EmailContent | null;
   fields: ClientEmailFields;
   followUps: FollowUp[];
@@ -78,6 +78,7 @@ type ClientEmailFields = {
 type ClickUpHistoryItem = {
   id?: string;
   field?: string;
+  date?: string | number;
   before?: unknown;
   after?: unknown;
   custom_field?: { id?: string; name?: string; type?: string };
@@ -567,9 +568,14 @@ async function dispatchToN8n(input: {
   action: "send_email" | "schedule_only";
   callbackUrl?: string | null;
   requireCondition?: boolean;
+  startedAtMs?: number;
+  daysElapsed?: number;
+  trigger?: "clickup_webhook" | "daily_scan";
 }): Promise<AutomationRunResult> {
   const { task, fields } = await loadClientFields(input.taskId);
   const condition = conditionFor(input.automation);
+  const startedAtMs = input.startedAtMs;
+  const trigger = input.trigger ?? "clickup_webhook";
 
   if (input.requireCondition && condition && !condition.check(fields)) {
     return {
@@ -578,6 +584,36 @@ async function dispatchToN8n(input: {
       skipped: true,
       reason: `Condition failed: expected ${condition.reason}, got assessmentStage="${fields.assessmentStage}" status="${fields.status}"`,
     };
+  }
+
+  if (input.automation === EMAIL_AUTOMATIONS.waitingListDay0 && startedAtMs) {
+    const stamped = await stampWaitingListStart(task, startedAtMs);
+    if (stamped.sent.has(EMAIL_AUTOMATIONS.waitingListDay0)) {
+      return {
+        automation: input.automation,
+        taskId: input.taskId,
+        skipped: true,
+        reason: "Waiting list day 0 email was already sent for this stint",
+      };
+    }
+  }
+
+  if (input.automation === EMAIL_AUTOMATIONS.noTechAssigned && startedAtMs) {
+    await stampNoTechStart(task, startedAtMs);
+  }
+
+  if (trigger === "daily_scan") {
+    const fieldIds = await ensureAutomationFieldIds();
+    const latest = await getClickUpTask(input.taskId);
+    const state = readScheduleState(latest, fieldIds);
+    if (state.sent.has(input.automation)) {
+      return {
+        automation: input.automation,
+        taskId: input.taskId,
+        skipped: true,
+        reason: `${input.automation} was already marked sent`,
+      };
+    }
   }
 
   let email: EmailContent | null = null;
@@ -600,6 +636,9 @@ async function dispatchToN8n(input: {
     automation: input.automation,
     taskId: task.id,
     taskUrl: taskUrlOf(task),
+    trigger,
+    startedAt: startedAtMs ? new Date(startedAtMs).toISOString() : null,
+    daysElapsed: input.daysElapsed ?? null,
     email,
     fields,
     followUps: followUpsFor(input.automation),
@@ -608,12 +647,26 @@ async function dispatchToN8n(input: {
       : null,
   });
 
+  if (input.action === "send_email") {
+    await markAutomationSent(task.id, input.automation);
+  }
+
   return {
     automation: input.automation,
     taskId: task.id,
     skipped: false,
     n8nStatus,
   };
+}
+
+function historyDateMs(item: ClickUpHistoryItem): number {
+  const raw = item.date;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+  if (typeof raw === "string" && /^\d+$/.test(raw.trim())) {
+    const parsed = Number(raw.trim());
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return Date.now();
 }
 
 function historyItemsOf(body: JsonObject): ClickUpHistoryItem[] {
@@ -675,6 +728,9 @@ export async function processClickUpTaskEvent(
             action: "send_email",
             callbackUrl,
             requireCondition: false,
+            startedAtMs: historyDateMs(item),
+            daysElapsed: 0,
+            trigger: "clickup_webhook",
           }),
         );
       }
@@ -691,6 +747,9 @@ export async function processClickUpTaskEvent(
             action: "send_email",
             callbackUrl,
             requireCondition: false,
+            startedAtMs: historyDateMs(item),
+            daysElapsed: 0,
+            trigger: "clickup_webhook",
           }),
         );
       }
@@ -711,6 +770,9 @@ export async function processClickUpTaskEvent(
             action: "schedule_only",
             callbackUrl,
             requireCondition: false,
+            startedAtMs: historyDateMs(item),
+            daysElapsed: 0,
+            trigger: "clickup_webhook",
           }),
         );
       }
@@ -727,6 +789,9 @@ export async function processClickUpTaskEvent(
           action: "send_email",
           callbackUrl,
           requireCondition: false,
+          startedAtMs: Date.now(),
+          daysElapsed: 0,
+          trigger: "clickup_webhook",
         }),
       );
     } else if (
@@ -740,6 +805,9 @@ export async function processClickUpTaskEvent(
           action: "send_email",
           callbackUrl,
           requireCondition: false,
+          startedAtMs: Date.now(),
+          daysElapsed: 0,
+          trigger: "clickup_webhook",
         }),
       );
     }
@@ -751,6 +819,9 @@ export async function processClickUpTaskEvent(
           action: "schedule_only",
           callbackUrl,
           requireCondition: false,
+          startedAtMs: Date.now(),
+          daysElapsed: 0,
+          trigger: "clickup_webhook",
         }),
       );
     }
@@ -790,6 +861,7 @@ export async function runScheduledAutomation(input: {
       action: "schedule_only",
       callbackUrl: input.callbackUrl,
       requireCondition: true,
+      trigger: "daily_scan",
     });
   }
 
@@ -799,7 +871,38 @@ export async function runScheduledAutomation(input: {
     action: "send_email",
     callbackUrl: input.callbackUrl,
     requireCondition: true,
+    trigger: "daily_scan",
   });
+}
+
+export async function scanEmailAutomations(callbackUrl?: string | null): Promise<{
+  scannedAt: string;
+  unstamped: Array<{ taskId: string; kind: "waiting_list" | "no_tech" }>;
+  results: AutomationRunResult[];
+}> {
+  const { due, unstamped } = await collectDueEmailAutomations();
+  const results: AutomationRunResult[] = [];
+
+  for (const item of due) {
+    results.push(
+      await dispatchToN8n({
+        automation: item.automation,
+        taskId: item.taskId,
+        action: "send_email",
+        callbackUrl,
+        requireCondition: true,
+        startedAtMs: item.startedAtMs,
+        daysElapsed: item.daysElapsed,
+        trigger: "daily_scan",
+      }),
+    );
+  }
+
+  return {
+    scannedAt: new Date().toISOString(),
+    unstamped,
+    results,
+  };
 }
 
 export function parseRunRequest(body: unknown): {

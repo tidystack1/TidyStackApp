@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   emailAutomationsCallbackUrl,
-  parseRunRequest,
-  runScheduledAutomation,
+  scanEmailAutomations,
 } from "../../_shared/email-automations";
 import {
   aspirePublicOrigin,
@@ -18,7 +17,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     message:
-      "n8n can POST { taskId, automation } here to run one follow-up. Prefer the daily /api/aspire/email-automations/scan job.",
+      "n8n should POST here on a daily schedule. This app checks ClickUp waiting-list and no-tech dates and webhooks n8n for any due emails.",
   });
 }
 
@@ -28,31 +27,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const parsed = parseRunRequest(await request.json());
-    if (!parsed) {
-      return NextResponse.json(
-        { error: "Expected JSON body with taskId and automation" },
-        { status: 400 },
-      );
-    }
-
     const origin = aspirePublicOrigin(request);
     const callbackUrl = origin
       ? emailAutomationsCallbackUrl(origin, webhookAccessToken())
       : null;
 
-    const result = await runScheduledAutomation({
-      ...parsed,
-      callbackUrl,
-    });
+    const result = await scanEmailAutomations(callbackUrl);
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error(
-      "[aspire/email-automations/run]",
+      "[aspire/email-automations/scan]",
       error instanceof Error ? error.message : error,
     );
     return NextResponse.json(
-      { error: "Failed to run Aspire email automation" },
+      { error: "Failed to scan Aspire email automations" },
       { status: 500 },
     );
   }

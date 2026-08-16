@@ -276,11 +276,88 @@ async function setCustomFields(
   fields: ClickUpCustomField[],
 ): Promise<void> {
   for (const field of fields) {
-    await clickUpJson(`/task/${taskId}/field/${field.id}`, {
-      method: "POST",
-      body: JSON.stringify({ value: field.value }),
-    });
+    await setClickUpCustomField(taskId, field.id, field.value);
   }
+}
+
+export async function setClickUpCustomField(
+  taskId: string,
+  fieldId: string,
+  value: unknown,
+  valueOptions?: { time?: boolean },
+): Promise<void> {
+  await clickUpJson(`/task/${encodeURIComponent(taskId)}/field/${fieldId}`, {
+    method: "POST",
+    body: JSON.stringify(
+      valueOptions ? { value, value_options: valueOptions } : { value },
+    ),
+  });
+}
+
+export async function listClickUpListFields(): Promise<
+  Array<{ id: string; name: string; type: string }>
+> {
+  const result = await clickUpJson<{
+    fields?: Array<{ id: string; name: string; type: string }>;
+  }>(`/list/${CLICKUP_CLIENTS_LIST_ID}/field`);
+  return result.fields ?? [];
+}
+
+export async function createClickUpListField(input: {
+  name: string;
+  type: string;
+}): Promise<{ id: string; name: string; type: string }> {
+  const result = await clickUpJson<{
+    id?: string;
+    name?: string;
+    type?: string;
+    field?: { id?: string; name?: string; type?: string };
+  }>(`/list/${CLICKUP_CLIENTS_LIST_ID}/field`, {
+    method: "POST",
+    body: JSON.stringify({ name: input.name, type: input.type }),
+  });
+  const field = result.field ?? result;
+  if (!field.id) {
+    throw new Error(`ClickUp did not return an id for field "${input.name}"`);
+  }
+  return {
+    id: field.id,
+    name: field.name || input.name,
+    type: field.type || input.type,
+  };
+}
+
+export async function searchClickUpListTasks(input: {
+  customFields?: Array<{
+    field_id: string;
+    operator: string;
+    value: string | number;
+  }>;
+  statuses?: string[];
+  includeClosed?: boolean;
+}): Promise<ClickUpTask[]> {
+  const tasks: ClickUpTask[] = [];
+  for (let page = 0; page < 50; page += 1) {
+    const params = new URLSearchParams();
+    params.set("list_ids[]", CLICKUP_CLIENTS_LIST_ID);
+    params.set("page", String(page));
+    params.set("include_closed", input.includeClosed ? "true" : "false");
+    if (input.customFields?.length) {
+      params.set("custom_fields", JSON.stringify(input.customFields));
+    }
+    if (input.statuses?.length) {
+      for (const status of input.statuses) {
+        params.append("statuses[]", status);
+      }
+    }
+    const result = await clickUpJson<{
+      tasks?: ClickUpTask[];
+      last_page?: boolean;
+    }>(`/team/${CLICKUP_TEAM_ID}/task?${params.toString()}`);
+    tasks.push(...(result.tasks ?? []));
+    if (result.last_page || (result.tasks?.length ?? 0) < 100) break;
+  }
+  return tasks;
 }
 
 async function attachFile(

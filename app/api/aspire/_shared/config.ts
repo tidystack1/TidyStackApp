@@ -56,6 +56,14 @@ export const CLICKUP_ASSESSMENT_STAGE = {
 
 export const CLICKUP_NO_TECH_STATUS = "no tech assigned";
 
+export const ASPIRE_SCHEDULE_TIMEZONE = "America/New_York";
+
+export const CLICKUP_AUTOMATION_FIELD_NAMES = {
+  waitingListDate: "BCBA waiting list date",
+  noTechDate: "No tech assigned date",
+  followUpsSent: "Follow-up emails sent",
+} as const;
+
 export const ASPIRE_EMAIL_SENDERS = {
   rikki: { name: "Rikki Roth", email: "intake@aspireabat.com" },
   recruiting: { name: "Recruiting Team", email: "info@aspireabat.com" },
@@ -72,6 +80,21 @@ export const ASPIRE_N8N_EMAIL_WEBHOOK_URL =
 export function getAspireN8nWebhookUrl(): string {
   return ASPIRE_N8N_EMAIL_WEBHOOK_URL;
 }
+
+export const EMAIL_AUTOMATIONS = {
+  waitingListDay0: "waiting_list_day_0",
+  waitingListDay10: "waiting_list_day_10",
+  waitingListDay20: "waiting_list_day_20",
+  waitingListDay30: "waiting_list_day_30",
+  bcbaAssigned: "bcba_assigned",
+  noTechDay15: "no_tech_day_15",
+  noTechDay20: "no_tech_day_20",
+  noTechDay25: "no_tech_day_25",
+  noTechAssigned: "no_tech_assigned",
+} as const;
+
+export type EmailAutomationId =
+  (typeof EMAIL_AUTOMATIONS)[keyof typeof EMAIL_AUTOMATIONS];
 
 export const CLICKUP_GENDER_OPTIONS: Record<string, string> = {
   male: "b08dafa7-9d4c-40d4-9a4f-1953e021f1ca",
