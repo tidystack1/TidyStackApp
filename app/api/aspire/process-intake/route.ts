@@ -38,10 +38,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await processIntakePacket({
-      packet,
-      trigger: "manual",
-    });
+    const result = await processIntakePacket({ packet });
 
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
