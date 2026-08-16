@@ -8,7 +8,6 @@ import {
   CLIENT_INTAKE_FORM_TEMPLATE_ID,
   getLobbieCredentials,
 } from "./config";
-import { forwardToWebhookSite } from "./forward";
 import {
   findIntakeForm,
   isIntakeFormComplete,
@@ -78,12 +77,9 @@ function packetIncludesIntake(packet: LobbieFormPacket): boolean {
 
 export async function processIntakePacket(input: {
   packet: LobbieFormPacket;
-  event?: Partial<LobbieWebhookEnvelope>;
-  trigger: "webhook" | "manual";
 }): Promise<{
   skipped: boolean;
   reason?: string;
-  forwarded?: boolean;
   packetId: number;
   formId?: number;
   clickup?: { taskId: string; taskUrl: string; created: boolean };
@@ -139,44 +135,8 @@ export async function processIntakePacket(input: {
     files,
   });
 
-  await forwardToWebhookSite({
-    source: "aspire-lobbie",
-    trigger: input.trigger,
-    accountId: ASPIRE_ACCOUNT_ID,
-    locationId: ASPIRE_LOCATION_ID,
-    formTemplateId: CLIENT_INTAKE_FORM_TEMPLATE_ID,
-    event: input.event
-      ? {
-          eventId: input.event.eventId ?? null,
-          eventType: input.event.eventType ?? null,
-          occurredAt: input.event.occurredAt ?? null,
-          deliveryAttempt: input.event.deliveryAttempt ?? null,
-        }
-      : null,
-    packet: {
-      id: packet.id,
-      completedAt: packet.completedAt ?? null,
-      createdAt: packet.createdAt ?? null,
-      updatedAt: packet.updatedAt ?? null,
-      patientId: packet.patientId ?? null,
-      formTemplateIds: packet.formTemplateIds ?? [],
-    },
-    intakeForm: {
-      id: intakeForm?.id ?? null,
-      formTemplateId: intakeForm?.formTemplateId ?? null,
-      formTemplateName: intakeForm?.formTemplateName ?? null,
-      status: intakeForm?.status ?? null,
-      isComplete: intakeForm?.isComplete ?? null,
-    },
-    patient,
-    mapped,
-    answers: intakeForm?.answers ?? [],
-    clickup,
-  });
-
   return {
     skipped: false,
-    forwarded: true,
     packetId: packet.id,
     formId: intakeForm?.id,
     clickup,
@@ -224,7 +184,6 @@ export async function processWebhookEnvelope(
 ): Promise<{
   skipped: boolean;
   reason?: string;
-  forwarded?: boolean;
   packetId?: number;
 }> {
   if (envelope.accountId != null && envelope.accountId !== ASPIRE_ACCOUNT_ID) {
@@ -235,13 +194,7 @@ export async function processWebhookEnvelope(
   }
 
   if (envelope.eventType === "test.ping") {
-    await forwardToWebhookSite({
-      source: "aspire-lobbie",
-      trigger: "webhook",
-      eventType: envelope.eventType,
-      envelope,
-    });
-    return { skipped: false, forwarded: true };
+    return { skipped: true, reason: "test ping" };
   }
 
   if (
@@ -260,11 +213,7 @@ export async function processWebhookEnvelope(
     return { skipped: true, reason: "webhook payload did not include a form packet" };
   }
 
-  return processIntakePacket({
-    packet,
-    event: envelope,
-    trigger: "webhook",
-  });
+  return processIntakePacket({ packet });
 }
 
 export function parseWebhookEnvelope(body: unknown): LobbieWebhookEnvelope | null {

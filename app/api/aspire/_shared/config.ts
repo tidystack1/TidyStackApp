@@ -6,9 +6,6 @@ export const ASPIRE_ACCOUNT_ID = 533;
 export const ASPIRE_LOCATION_ID = 971;
 export const CLIENT_INTAKE_FORM_TEMPLATE_ID = 25622;
 
-export const FORWARD_WEBHOOK_URL =
-  "https://webhook.site/9d741498-adbc-49d3-90d0-a90e4af4df89";
-
 export const CLICKUP_API_BASE = "https://api.clickup.com/api/v2";
 export const CLICKUP_TEAM_ID = "90141469332";
 export const CLICKUP_CLIENTS_LIST_ID = "901418967819";
