@@ -277,29 +277,25 @@ export async function collectDueEmailAutomations(): Promise<{
   const unstamped: Array<{ taskId: string; kind: "waiting_list" | "no_tech" }> = [];
 
   for (const task of waitingListTasks) {
-    let state = readScheduleState(task, fieldIds);
+    const state = readScheduleState(task, fieldIds);
     let stampedNow = false;
-    if (state.waitingListSinceMs == null) {
-      const startedAtMs = Date.now();
+    let startedAtMs = state.waitingListSinceMs;
+    if (startedAtMs == null) {
+      startedAtMs = Date.now();
       await stampWaitingListStart(task, startedAtMs);
       await markAutomationSent(task.id, EMAIL_AUTOMATIONS.waitingListDay0);
-      state = {
-        waitingListSinceMs: startedAtMs,
-        noTechSinceMs: state.noTechSinceMs,
-        sent: new Set(state.sent),
-      };
       state.sent.add(EMAIL_AUTOMATIONS.waitingListDay0);
       stampedNow = true;
       unstamped.push({ taskId: task.id, kind: "waiting_list" });
     }
 
-    const daysElapsed = calendarDaysSince(state.waitingListSinceMs);
+    const daysElapsed = calendarDaysSince(startedAtMs);
     for (const automation of dueWaitingListAutomations(daysElapsed, state.sent)) {
       due.push({
         taskId: task.id,
         automation,
         daysElapsed,
-        startedAtMs: state.waitingListSinceMs,
+        startedAtMs,
         stampedNow,
       });
     }
@@ -307,27 +303,23 @@ export async function collectDueEmailAutomations(): Promise<{
 
   for (const task of noTechTasks) {
     if (!isNoTechTask(task)) continue;
-    let state = readScheduleState(task, fieldIds);
+    const state = readScheduleState(task, fieldIds);
     let stampedNow = false;
-    if (state.noTechSinceMs == null) {
-      const startedAtMs = Date.now();
+    let startedAtMs = state.noTechSinceMs;
+    if (startedAtMs == null) {
+      startedAtMs = Date.now();
       await stampNoTechStart(task, startedAtMs);
-      state = {
-        waitingListSinceMs: state.waitingListSinceMs,
-        noTechSinceMs: startedAtMs,
-        sent: state.sent,
-      };
       stampedNow = true;
       unstamped.push({ taskId: task.id, kind: "no_tech" });
     }
 
-    const daysElapsed = calendarDaysSince(state.noTechSinceMs);
+    const daysElapsed = calendarDaysSince(startedAtMs);
     for (const automation of dueNoTechAutomations(daysElapsed, state.sent)) {
       due.push({
         taskId: task.id,
         automation,
         daysElapsed,
-        startedAtMs: state.noTechSinceMs,
+        startedAtMs,
         stampedNow,
       });
     }
