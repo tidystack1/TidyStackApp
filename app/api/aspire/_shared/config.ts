@@ -37,7 +37,41 @@ export const CLICKUP_FIELDS = {
   guardian2FirstName: "e628704f-4e24-4ff4-a659-5f720c35fd37",
   dateOfBirth: "fd45c546-2941-47fa-ab63-e365230d31eb",
   guardian2CellPhone: "33547973-b2e9-4e90-99cb-e0fdc973581d",
+  assessmentStage: "58e3d994-8fa0-4aa5-9618-37f179945ed4",
+  assignedBcba: "da7af502-0425-43ca-871b-ac30c7454e9f",
 } as const;
+
+export const CLICKUP_ASSESSMENT_STAGE = {
+  waitingList: {
+    id: "02451751-f17b-44a9-b3a1-1bdb4080c705",
+    name: "BCBA Waiting List",
+    orderindex: 2,
+  },
+  assignedBcba: {
+    id: "6e67b207-7d46-4fa7-b906-8e8c10a87c52",
+    name: "Assigned BCBA",
+    orderindex: 1,
+  },
+} as const;
+
+export const CLICKUP_NO_TECH_STATUS = "no tech assigned";
+
+export const ASPIRE_EMAIL_SENDERS = {
+  rikki: { name: "Rikki Roth", email: "intake@aspireabat.com" },
+  recruiting: { name: "Recruiting Team", email: "info@aspireabat.com" },
+} as const;
+
+export const ASPIRE_NO_TECH_CC = [
+  "lschwartz@aspireabat.com",
+  "meinhorn@aspireabat.com",
+] as const;
+
+export const ASPIRE_N8N_EMAIL_WEBHOOK_URL =
+  "https://aspireaba.app.n8n.cloud/webhook/send-email";
+
+export function getAspireN8nWebhookUrl(): string {
+  return ASPIRE_N8N_EMAIL_WEBHOOK_URL;
+}
 
 export const CLICKUP_GENDER_OPTIONS: Record<string, string> = {
   male: "b08dafa7-9d4c-40d4-9a4f-1953e021f1ca",

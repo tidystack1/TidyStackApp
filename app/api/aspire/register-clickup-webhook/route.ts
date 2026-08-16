@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { createWebhook, listWebhooks } from "../_shared/lobbie";
+import { CLICKUP_CLIENTS_LIST_ID } from "../_shared/config";
+import { createClickUpWebhook, listClickUpWebhooks } from "../_shared/clickup";
 import {
   aspirePublicOrigin,
   isAspireRequestAuthorized,
@@ -10,8 +11,26 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const EVENT_TYPES = ["form-packet.created", "form-packet.updated"] as const;
-const WEBHOOK_NAME = "Aspire intake to TidyStack";
+const EVENTS = ["taskCreated", "taskUpdated"] as const;
+
+export async function GET(request: NextRequest) {
+  try {
+    if (!isAspireRequestAuthorized(request)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const webhooks = await listClickUpWebhooks();
+    return NextResponse.json({ ok: true, webhooks });
+  } catch (error) {
+    console.error(
+      "[aspire/register-clickup-webhook]",
+      error instanceof Error ? error.message : error,
+    );
+    return NextResponse.json(
+      { error: "Failed to list ClickUp webhooks" },
+      { status: 500 },
+    );
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,13 +52,15 @@ export async function POST(request: NextRequest) {
     const token = webhookAccessToken();
     const webhookUrl =
       requestedUrl ||
-      (origin ? `${origin.replace(/\/$/, "")}/api/aspire/webhook?token=${token}` : null);
+      (origin
+        ? `${origin.replace(/\/$/, "")}/api/aspire/clickup-webhook?token=${token}`
+        : null);
 
     if (!webhookUrl) {
       return NextResponse.json(
         {
           error:
-            "Need a public HTTPS URL. Deploy the app, or POST { \"url\": \"https://your-host/api/aspire/webhook?token=...\" }.",
+            "Need a public HTTPS URL. Deploy the app, or POST { \"url\": \"https://your-host/api/aspire/clickup-webhook?token=...\" }.",
         },
         { status: 400 },
       );
@@ -47,13 +68,15 @@ export async function POST(request: NextRequest) {
 
     if (!webhookUrl.startsWith("https://")) {
       return NextResponse.json(
-        { error: "Lobbie requires an HTTPS webhook URL" },
+        { error: "ClickUp requires an HTTPS webhook URL" },
         { status: 400 },
       );
     }
 
-    const existing = await listWebhooks();
-    const alreadyRegistered = existing.find((item) => item.url === webhookUrl);
+    const existing = await listClickUpWebhooks();
+    const alreadyRegistered = existing.find(
+      (item) => item.endpoint === webhookUrl,
+    );
     if (alreadyRegistered) {
       return NextResponse.json({
         ok: true,
@@ -63,10 +86,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const created = await createWebhook({
-      url: webhookUrl,
-      eventTypes: [...EVENT_TYPES],
-      name: WEBHOOK_NAME,
+    const created = await createClickUpWebhook({
+      endpoint: webhookUrl,
+      events: [...EVENTS],
+      listId: CLICKUP_CLIENTS_LIST_ID,
     });
 
     return NextResponse.json({
@@ -77,11 +100,11 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error(
-      "[aspire/register-webhook]",
+      "[aspire/register-clickup-webhook]",
       error instanceof Error ? error.message : error,
     );
     return NextResponse.json(
-      { error: "Failed to register Lobbie webhook" },
+      { error: "Failed to register ClickUp webhook" },
       { status: 500 },
     );
   }

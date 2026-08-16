@@ -15,6 +15,45 @@ export type ClickUpSyncResult = {
   created: boolean;
 };
 
+export type ClickUpDropdownOption = {
+  id: string;
+  name: string;
+  orderindex?: number;
+};
+
+export type ClickUpTaskCustomField = {
+  id: string;
+  name?: string;
+  type?: string;
+  value?: unknown;
+  type_config?: {
+    options?: ClickUpDropdownOption[];
+  };
+};
+
+export type ClickUpTask = {
+  id: string;
+  name: string;
+  url?: string;
+  status?: { status?: string };
+  custom_fields?: ClickUpTaskCustomField[];
+};
+
+export type ClickUpWebhookRecord = {
+  id: string;
+  userid?: number;
+  team_id?: string;
+  endpoint: string;
+  client_id?: string;
+  events: string[];
+  task_id?: string | null;
+  list_id?: string | null;
+  folder_id?: string | null;
+  space_id?: string | null;
+  health?: { status?: string };
+  secret?: string;
+};
+
 type ClickUpCustomField = {
   id: string;
   value: unknown;
@@ -265,6 +304,36 @@ async function attachFile(
     { method: "POST", body: form },
   );
   return typeof result.url === "string" ? result.url : null;
+}
+
+export async function getClickUpTask(taskId: string): Promise<ClickUpTask> {
+  return clickUpJson<ClickUpTask>(`/task/${encodeURIComponent(taskId)}`);
+}
+
+export async function listClickUpWebhooks(): Promise<ClickUpWebhookRecord[]> {
+  const result = await clickUpJson<{ webhooks?: ClickUpWebhookRecord[] }>(
+    `/team/${CLICKUP_TEAM_ID}/webhook`,
+  );
+  return result.webhooks ?? [];
+}
+
+export async function createClickUpWebhook(input: {
+  endpoint: string;
+  events: string[];
+  listId: string;
+}): Promise<ClickUpWebhookRecord> {
+  const result = await clickUpJson<{ webhook?: ClickUpWebhookRecord } & ClickUpWebhookRecord>(
+    `/team/${CLICKUP_TEAM_ID}/webhook`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        endpoint: input.endpoint,
+        events: input.events,
+        list_id: input.listId,
+      }),
+    },
+  );
+  return result.webhook ?? result;
 }
 
 export async function upsertClickUpClient(input: {

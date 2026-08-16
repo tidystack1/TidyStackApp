@@ -52,6 +52,26 @@ export function isAspireRequestAuthorized(request: NextRequest): boolean {
   return isWebhookTokenValid(token);
 }
 
+export function aspirePublicOrigin(request: NextRequest): string | null {
+  const configured = process.env.ASPIRE_PUBLIC_URL?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const forwardedProto = request.headers.get("x-forwarded-proto");
+  const host = forwardedHost || request.headers.get("host");
+  if (host && forwardedProto) return `${forwardedProto}://${host}`;
+  if (host && !host.includes("localhost") && !host.startsWith("127.")) {
+    return `https://${host}`;
+  }
+
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) {
+    return vercelUrl.startsWith("http") ? vercelUrl : `https://${vercelUrl}`;
+  }
+
+  return null;
+}
+
 function packetIncludesIntake(packet: LobbieFormPacket): boolean {
   return (packet.formTemplateIds ?? []).includes(CLIENT_INTAKE_FORM_TEMPLATE_ID);
 }
