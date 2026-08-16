@@ -14,13 +14,16 @@ import {
   isIntakeFormComplete,
   mapIntakeFields,
 } from "./intake";
+import { upsertClickUpClient } from "./clickup";
 import {
+  downloadFormFile,
   getFormPacket,
   getFormPacketForms,
   getPatient,
   parsePacketFromUnknown,
 } from "./lobbie";
 import type {
+  FileRef,
   JsonObject,
   LobbieFormPacket,
   LobbieWebhookEnvelope,
@@ -63,6 +66,7 @@ export async function processIntakePacket(input: {
   forwarded?: boolean;
   packetId: number;
   formId?: number;
+  clickup?: { taskId: string; taskUrl: string; created: boolean };
 }> {
   const packet =
     packetIncludesIntake(input.packet) && input.packet.patientId
@@ -99,6 +103,22 @@ export async function processIntakePacket(input: {
   const patient = packet.patientId ? await getPatient(packet.patientId) : null;
   const mapped = mapIntakeFields(intakeForm?.answers ?? [], patient);
 
+  if (!packet.patientId) {
+    return {
+      skipped: true,
+      reason: "packet is missing a patient id",
+      packetId: packet.id,
+      formId: intakeForm?.id,
+    };
+  }
+
+  const files = await downloadMappedFiles(mapped);
+  const clickup = await upsertClickUpClient({
+    mapped,
+    patientId: packet.patientId,
+    files,
+  });
+
   await forwardToWebhookSite({
     source: "aspire-lobbie",
     trigger: input.trigger,
@@ -131,6 +151,7 @@ export async function processIntakePacket(input: {
     patient,
     mapped,
     answers: intakeForm?.answers ?? [],
+    clickup,
   });
 
   return {
@@ -138,7 +159,44 @@ export async function processIntakePacket(input: {
     forwarded: true,
     packetId: packet.id,
     formId: intakeForm?.id,
+    clickup,
   };
+}
+
+async function downloadMappedFiles(mapped: {
+  diagnosticReport: FileRef | null;
+  insuranceCardFront: FileRef | null;
+  insuranceCardBack: FileRef | null;
+}): Promise<Array<{ file: FileRef; bytes: Uint8Array; filename: string }>> {
+  const refs = [
+    mapped.diagnosticReport
+      ? { file: mapped.diagnosticReport, filename: mapped.diagnosticReport.fileName }
+      : null,
+    mapped.insuranceCardFront
+      ? {
+          file: mapped.insuranceCardFront,
+          filename: `insurance-card-front.${extensionOf(mapped.insuranceCardFront.fileName)}`,
+        }
+      : null,
+    mapped.insuranceCardBack
+      ? {
+          file: mapped.insuranceCardBack,
+          filename: `insurance-card-back.${extensionOf(mapped.insuranceCardBack.fileName)}`,
+        }
+      : null,
+  ].filter((item): item is { file: FileRef; filename: string } => item != null);
+
+  const downloaded = [];
+  for (const item of refs) {
+    const bytes = await downloadFormFile(item.file.path);
+    if (bytes) downloaded.push({ ...item, bytes });
+  }
+  return downloaded;
+}
+
+function extensionOf(fileName: string): string {
+  const parts = fileName.split(".");
+  return parts.length > 1 ? parts.pop() || "bin" : "bin";
 }
 
 export async function processWebhookEnvelope(

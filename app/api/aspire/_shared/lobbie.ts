@@ -177,6 +177,30 @@ export async function createWebhook(input: {
   });
 }
 
+export async function downloadFormFile(filePath: string): Promise<Uint8Array | null> {
+  const encoded = encodeURIComponent(filePath);
+  const candidates = [
+    `/partner/v2/account/${ASPIRE_ACCOUNT_ID}/location/${ASPIRE_LOCATION_ID}/file?path=${encoded}`,
+    `/partner/v2/account/${ASPIRE_ACCOUNT_ID}/file?path=${encoded}`,
+    `/partner/v2/account/${ASPIRE_ACCOUNT_ID}/location/${ASPIRE_LOCATION_ID}/files/${filePath}`,
+  ];
+
+  for (const path of candidates) {
+    const response = await lobbieFetch(path, {
+      headers: { Accept: "*/*" },
+    });
+    if (!response.ok) continue;
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("text/html") || contentType.includes("json")) {
+      continue;
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > 0) return bytes;
+  }
+
+  return null;
+}
+
 export function parsePacketFromUnknown(value: unknown): LobbieFormPacket | null {
   if (!isRecord(value)) return null;
   const id = typeof value.id === "number" ? value.id : Number(value.id);
