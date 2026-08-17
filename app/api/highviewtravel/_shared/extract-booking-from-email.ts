@@ -36,7 +36,8 @@ const BOOKING_JSON_SCHEMA = {
       },
       outboundDate: {
         type: ["string", "null"],
-        description: "Outbound departure date in DDMMM format (e.g. 18JUN). Null if not found.",
+        description:
+          "Outbound departure date in DDMMM format (e.g. 18JUN). Null if not found.",
       },
       returnDate: {
         type: ["string", "null"],
@@ -53,7 +54,8 @@ const BOOKING_JSON_SCHEMA = {
       },
       passengers: {
         type: ["integer", "null"],
-        description: "Total number of passengers on the request. Null if not found.",
+        description:
+          "Total number of passengers on the request. Null if not found.",
       },
       departureRegion: {
         type: ["string", "null"],
@@ -84,7 +86,7 @@ Rules:
 - Passenger name: return as "First Last" (middle names allowed), using the primary passenger on the request.
 - Departure and arrival airports: return ONLY verified 3-letter IATA codes that are explicitly stated or clearly shown in the email or images. Never guess, assume, or fabricate airport codes. If a code cannot be verified, return null.
 - Outbound date: DDMMM in uppercase (e.g. 18JUN). Return date: same format for round trips; null for one-way trips or if unknown.
-- Cabin class: exactly "Business" or "Economy", or null if unknown.
+- Cabin class: exactly "Business", "Mixed", or "Economy", or null if unknown.
 - Route: "Domestic" if both airports are in the same country, otherwise "International", or null if unknown.
 - Passengers: total passenger count on the request, or null if unknown.
 - Departure region: "US" if the departure airport is in the United States, otherwise "Non-US", or null if unknown.
@@ -124,7 +126,9 @@ function toNullablePassengers(value: number | null | undefined): number | null {
   return Math.trunc(value);
 }
 
-export function normalizeExtraction(raw: Partial<BookingExtraction>): BookingExtraction {
+export function normalizeExtraction(
+  raw: Partial<BookingExtraction>,
+): BookingExtraction {
   return {
     passengerName: toNullableString(raw.passengerName ?? null),
     departureAirport: toNullableIata(raw.departureAirport ?? null),
@@ -136,7 +140,9 @@ export function normalizeExtraction(raw: Partial<BookingExtraction>): BookingExt
         ? raw.cabinClass
         : null,
     route:
-      raw.route === "Domestic" || raw.route === "International" ? raw.route : null,
+      raw.route === "Domestic" || raw.route === "International"
+        ? raw.route
+        : null,
     passengers: toNullablePassengers(raw.passengers ?? null),
     departureRegion:
       raw.departureRegion === "US" || raw.departureRegion === "Non-US"
@@ -191,7 +197,9 @@ export async function extractBookingFromEmail(
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`OpenAI request failed (${res.status}): ${text.slice(0, 500)}`);
+    throw new Error(
+      `OpenAI request failed (${res.status}): ${text.slice(0, 500)}`,
+    );
   }
 
   const json = (await res.json()) as {
