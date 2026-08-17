@@ -103,9 +103,10 @@ function buildDealProperties(
 function cabinClassPropertyValue(
   cabinClass: BookingExtraction["cabinClass"],
 ): string | undefined {
-  // HubSpot `cabin_class` is a boolean: true = Business, false = Economy.
+  // HubSpot `cabin_class`: true = Business, false = Economy, Mixed = both.
   if (cabinClass === "Business") return "true";
   if (cabinClass === "Economy") return "false";
+  if (cabinClass === "Mixed") return "Mixed";
   return undefined;
 }
 

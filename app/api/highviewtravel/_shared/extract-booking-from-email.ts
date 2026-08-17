@@ -7,7 +7,7 @@ export type BookingExtraction = {
   arrivalAirport: string | null;
   outboundDate: string | null;
   returnDate: string | null;
-  cabinClass: "Business" | "Economy" | null;
+  cabinClass: "Business" | "Mixed" | "Economy" | null;
   route: "Domestic" | "International" | null;
   passengers: number | null;
   departureRegion: "US" | "Non-US" | null;
@@ -46,7 +46,9 @@ const BOOKING_JSON_SCHEMA = {
       },
       cabinClass: {
         type: ["string", "null"],
-        enum: ["Business", "Economy", null],
+        enum: ["Business", "Mixed", "Economy", null],
+        description:
+          "Cabin class. Use Mixed when the request includes both Business and Economy. Null if unknown.",
       },
       route: {
         type: ["string", "null"],
@@ -86,7 +88,7 @@ Rules:
 - Passenger name: return as "First Last" (middle names allowed), using the primary passenger on the request.
 - Departure and arrival airports: return ONLY verified 3-letter IATA codes that are explicitly stated or clearly shown in the email or images. Never guess, assume, or fabricate airport codes. If a code cannot be verified, return null.
 - Outbound date: DDMMM in uppercase (e.g. 18JUN). Return date: same format for round trips; null for one-way trips or if unknown.
-- Cabin class: exactly "Business", "Mixed", or "Economy", or null if unknown.
+- Cabin class: exactly "Business", "Mixed", or "Economy", or null if unknown. Use "Mixed" when the request includes both Business and Economy.
 - Route: "Domestic" if both airports are in the same country, otherwise "International", or null if unknown.
 - Passengers: total passenger count on the request, or null if unknown.
 - Departure region: "US" if the departure airport is in the United States, otherwise "Non-US", or null if unknown.
@@ -136,7 +138,9 @@ export function normalizeExtraction(
     outboundDate: toNullableDate(raw.outboundDate ?? null),
     returnDate: toNullableDate(raw.returnDate ?? null),
     cabinClass:
-      raw.cabinClass === "Business" || raw.cabinClass === "Economy"
+      raw.cabinClass === "Business" ||
+      raw.cabinClass === "Mixed" ||
+      raw.cabinClass === "Economy"
         ? raw.cabinClass
         : null,
     route:
