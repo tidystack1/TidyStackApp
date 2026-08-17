@@ -43,14 +43,14 @@ type EmailContent = {
 
 export type N8nEmailPayload = {
   source: "aspire";
-  action: "send_email" | "schedule_only";
+  action: "send_email";
   automation: EmailAutomationId;
   taskId: string;
   taskUrl: string;
   trigger: "clickup_webhook" | "daily_scan";
   startedAt: string | null;
   daysElapsed: number | null;
-  email: EmailContent | null;
+  email: EmailContent;
   fields: ClientEmailFields;
   followUps: FollowUp[];
   callback: { url: string; method: "POST" } | null;
@@ -569,7 +569,6 @@ export function emailAutomationsCallbackUrl(origin: string, token: string): stri
 async function dispatchToN8n(input: {
   automation: EmailAutomationId;
   taskId: string;
-  action: "send_email" | "schedule_only";
   callbackUrl?: string | null;
   requireCondition?: boolean;
   startedAtMs?: number;
@@ -603,10 +602,6 @@ async function dispatchToN8n(input: {
     }
   }
 
-  if (input.automation === EMAIL_AUTOMATIONS.noTechAssigned && startedAtMs) {
-    await stampNoTechStart(task, startedAtMs);
-  }
-
   if (trigger === "daily_scan") {
     const fieldIds = await ensureAutomationFieldIds();
     const latest = await getClickUpTask(input.taskId);
@@ -621,18 +616,14 @@ async function dispatchToN8n(input: {
     }
   }
 
-  let email: EmailContent | null = null;
-  if (input.action === "send_email") {
-    const built = buildEmail(input.automation, fields);
-    if ("error" in built) {
-      return {
-        automation: input.automation,
-        taskId: input.taskId,
-        skipped: true,
-        reason: built.error,
-      };
-    }
-    email = built;
+  const built = buildEmail(input.automation, fields);
+  if ("error" in built) {
+    return {
+      automation: input.automation,
+      taskId: input.taskId,
+      skipped: true,
+      reason: built.error,
+    };
   }
 
   if (input.delayBeforeN8nMs && input.delayBeforeN8nMs > 0) {
@@ -641,14 +632,14 @@ async function dispatchToN8n(input: {
 
   const n8nStatus = await postToN8n({
     source: "aspire",
-    action: input.action,
+    action: "send_email",
     automation: input.automation,
     taskId: task.id,
     taskUrl: taskUrlOf(task),
     trigger,
     startedAt: startedAtMs ? new Date(startedAtMs).toISOString() : null,
     daysElapsed: input.daysElapsed ?? null,
-    email,
+    email: built,
     fields,
     followUps: followUpsFor(input.automation),
     callback: input.callbackUrl
@@ -656,15 +647,37 @@ async function dispatchToN8n(input: {
       : null,
   });
 
-  if (input.action === "send_email") {
-    await markAutomationSent(task.id, input.automation);
-  }
+  await markAutomationSent(task.id, input.automation);
 
   return {
     automation: input.automation,
     taskId: task.id,
     skipped: false,
     n8nStatus,
+  };
+}
+
+async function stampNoTechWithoutEmail(input: {
+  taskId: string;
+  startedAtMs: number;
+  requireCondition?: boolean;
+}): Promise<AutomationRunResult> {
+  const { task, fields } = await loadClientFields(input.taskId);
+  if (input.requireCondition && !stillNoTech(fields)) {
+    return {
+      automation: EMAIL_AUTOMATIONS.noTechAssigned,
+      taskId: input.taskId,
+      skipped: true,
+      reason: `Condition failed: expected Status is "${CLICKUP_NO_TECH_STATUS}", got status="${fields.status}"`,
+    };
+  }
+
+  await stampNoTechStart(task, input.startedAtMs);
+  return {
+    automation: EMAIL_AUTOMATIONS.noTechAssigned,
+    taskId: task.id,
+    skipped: false,
+    reason: "Stamped No tech assigned date; no email to send",
   };
 }
 
@@ -734,7 +747,6 @@ export async function processClickUpTaskEvent(
           await dispatchToN8n({
             automation: EMAIL_AUTOMATIONS.waitingListDay0,
             taskId,
-            action: "send_email",
             callbackUrl,
             requireCondition: false,
             startedAtMs: historyDateMs(item),
@@ -753,7 +765,6 @@ export async function processClickUpTaskEvent(
           await dispatchToN8n({
             automation: EMAIL_AUTOMATIONS.bcbaAssigned,
             taskId,
-            action: "send_email",
             callbackUrl,
             requireCondition: false,
             startedAtMs: historyDateMs(item),
@@ -773,15 +784,9 @@ export async function processClickUpTaskEvent(
         )
       ) {
         results.push(
-          await dispatchToN8n({
-            automation: EMAIL_AUTOMATIONS.noTechAssigned,
+          await stampNoTechWithoutEmail({
             taskId,
-            action: "schedule_only",
-            callbackUrl,
-            requireCondition: false,
             startedAtMs: historyDateMs(item),
-            daysElapsed: 0,
-            trigger: "clickup_webhook",
           }),
         );
       }
@@ -795,7 +800,6 @@ export async function processClickUpTaskEvent(
         await dispatchToN8n({
           automation: EMAIL_AUTOMATIONS.waitingListDay0,
           taskId,
-          action: "send_email",
           callbackUrl,
           requireCondition: false,
           startedAtMs: Date.now(),
@@ -811,7 +815,6 @@ export async function processClickUpTaskEvent(
         await dispatchToN8n({
           automation: EMAIL_AUTOMATIONS.bcbaAssigned,
           taskId,
-          action: "send_email",
           callbackUrl,
           requireCondition: false,
           startedAtMs: Date.now(),
@@ -822,15 +825,9 @@ export async function processClickUpTaskEvent(
     }
     if (stillNoTech(fields)) {
       results.push(
-        await dispatchToN8n({
-          automation: EMAIL_AUTOMATIONS.noTechAssigned,
+        await stampNoTechWithoutEmail({
           taskId,
-          action: "schedule_only",
-          callbackUrl,
-          requireCondition: false,
           startedAtMs: Date.now(),
-          daysElapsed: 0,
-          trigger: "clickup_webhook",
         }),
       );
     }
@@ -864,20 +861,16 @@ export async function runScheduledAutomation(input: {
   }
 
   if (automation === EMAIL_AUTOMATIONS.noTechAssigned) {
-    return dispatchToN8n({
-      automation,
+    return stampNoTechWithoutEmail({
       taskId: input.taskId,
-      action: "schedule_only",
-      callbackUrl: input.callbackUrl,
+      startedAtMs: Date.now(),
       requireCondition: true,
-      trigger: "daily_scan",
     });
   }
 
   return dispatchToN8n({
     automation,
     taskId: input.taskId,
-    action: "send_email",
     callbackUrl: input.callbackUrl,
     requireCondition: true,
     trigger: "daily_scan",
@@ -897,7 +890,6 @@ export async function scanEmailAutomations(callbackUrl?: string | null): Promise
     const result = await dispatchToN8n({
       automation: item.automation,
       taskId: item.taskId,
-      action: "send_email",
       callbackUrl,
       requireCondition: true,
       startedAtMs: item.startedAtMs,
