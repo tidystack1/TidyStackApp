@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ASPIRE_GHL_LOBBIE_ID_WEBHOOK_URL } from "../_shared/config";
 import { createPatient } from "../_shared/lobbie";
-import { isAspireRequestAuthorized } from "../_shared/process";
 import type { JsonObject } from "../_shared/types";
 
 export const runtime = "nodejs";
@@ -102,10 +101,6 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    if (!isAspireRequestAuthorized(request)) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     let body: unknown;
     try {
       body = await request.json();
