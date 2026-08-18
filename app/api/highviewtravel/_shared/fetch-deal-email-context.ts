@@ -4,6 +4,7 @@ const DEAL_PROPERTIES = [
   "hubspot_owner_id",
   "reservation_details",
   "penalties",
+  "penalties_fill",
   "passenger_name",
   "commission",
   "form_type",
@@ -28,6 +29,7 @@ export type DealEmailContextPayload = {
   reservationDetails: string;
   hubspotDealId: string;
   Penalties: string;
+  penaltiesFill: string;
   PassengerName: string;
   RatePP: string;
   ContactFirstName: string;
@@ -205,6 +207,7 @@ export async function fetchDealEmailContext(
     reservationDetails: prop(deal.properties, "reservation_details"),
     hubspotDealId: deal.id,
     Penalties: prop(deal.properties, "penalties"),
+    penaltiesFill: prop(deal.properties, "penalties_fill"),
     PassengerName: prop(deal.properties, "passenger_name"),
     RatePP: prop(deal.properties, "commission"),
     ContactFirstName: prop(contact.properties, "firstname"),

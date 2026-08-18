@@ -77,6 +77,47 @@ export function defaultPenaltiesForFormType(formType: string | undefined): {
   };
 }
 
+function normalizeFillMode(value: string | undefined | null): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+/** HubSpot `penalties_fill` is Auto Fill (ignore deal `penalties`, use form-type defaults). */
+export function isAutoFillPenalties(value: string | undefined | null): boolean {
+  const normalized = normalizeFillMode(value);
+  return normalized === "auto fill" || normalized === "auto";
+}
+
+/**
+ * Formstack Penalties: Auto Fill uses form-type defaults; Manual Fill (or anything else)
+ * uses the HubSpot `penalties` field.
+ */
+export function resolvePrefillPenalties(input: {
+  penaltiesFill?: string;
+  formType?: string;
+  hubspotPenalties?: string;
+}): {
+  mode: "auto" | "manual";
+  formTypeLabel: string;
+  penalties: string;
+} {
+  const { formTypeLabel, penalties: defaultPenalties } =
+    defaultPenaltiesForFormType(input.formType);
+
+  if (isAutoFillPenalties(input.penaltiesFill)) {
+    return { mode: "auto", formTypeLabel, penalties: defaultPenalties };
+  }
+
+  return {
+    mode: "manual",
+    formTypeLabel,
+    penalties: input.hubspotPenalties ?? "",
+  };
+}
+
 const DEFAULT_FORMSTACK_FORM_ID = "6471647";
 
 export type FormstackPrefillField = {

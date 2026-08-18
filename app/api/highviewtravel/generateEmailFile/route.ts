@@ -7,6 +7,7 @@ import {
   buildFormstackPrefillFields,
   dealEmailContextToFormstackInput,
   fetchFormstackPrefilledUrl,
+  resolvePrefillPenalties,
 } from "../_shared/formstack-prefill";
 
 // PNG signature (booking-email-signature.png in this folder) — not embedded in .eml at the moment.
@@ -347,6 +348,38 @@ export async function POST(request: NextRequest) {
 
     const parsed = dealEmailContextToFormstackInput(context);
     const { reservationDetails, hubspotDealId } = parsed;
+    const penaltiesFill = resolvePrefillPenalties({
+      penaltiesFill: context.penaltiesFill,
+      formType: parsed.formType,
+      hubspotPenalties: parsed.penalties,
+    });
+
+    if (penaltiesFill.mode === "auto") {
+      if (!parsed.formType?.trim()) {
+        return NextResponse.json(
+          {
+            error: "Deal is missing form_type",
+            dealId: hubspotDealId,
+          },
+          { status: 400 },
+        );
+      }
+      if (!penaltiesFill.penalties) {
+        return NextResponse.json(
+          {
+            error: `No default penalties text for form type "${penaltiesFill.formTypeLabel}"`,
+            dealId: hubspotDealId,
+            formType: penaltiesFill.formTypeLabel,
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    parsed.penalties = penaltiesFill.penalties;
+    console.log(
+      `[generateEmailFile] Penalties ${penaltiesFill.mode} fill for deal ${hubspotDealId} (form type "${penaltiesFill.formTypeLabel}")`,
+    );
 
     console.log(
       `[generateEmailFile] Formstack prefill for deal ${hubspotDealId}`,
@@ -390,6 +423,11 @@ export async function POST(request: NextRequest) {
       fileId,
       fileUrl,
       property,
+      penaltiesFill: {
+        mode: penaltiesFill.mode,
+        formType: penaltiesFill.formTypeLabel,
+        value: penaltiesFill.penalties,
+      },
       context,
     });
   } catch (error) {
