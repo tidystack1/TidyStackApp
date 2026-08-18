@@ -1,196 +1,269 @@
-# Zoho CRM PDF Attachment Combiner
+# TidyStack App
 
-This Next.js application receives webhooks from Zoho CRM, fetches all PDF attachments from a record, combines them into a single PDF, and sends it via email.
+A Next.js automation platform used by TidyStack for multiple clients. It is the code-owned replacement for n8n and Zapier: webhooks, CRM/database updates, PDF/email generation, and AI extraction live here instead of in visual workflow builders.
 
-## Features
+Each client has its own folder under `app/api`. External systems (HubSpot, SmartSuite, Zoho, ClickUp, Lobbie, Formstack, Outlook add-ins, etc.) call those routes; the app talks back to the same tools as needed.
 
-- ✅ Receives POST requests with Zoho CRM record IDs
-- ✅ Fetches all attachments from Zoho CRM records
-- ✅ Filters and downloads PDF attachments only
-- ✅ Combines multiple PDFs into a single document using `pdf-lib`
-- ✅ Sends combined PDF via email using nodemailer
-- ✅ No third-party services required (free and open-source libraries only)
+## Why this instead of n8n / Zapier
 
-## Quick Start
+- Automations are in TypeScript, reviewed, and versioned in git
+- Multi-step workflows can run in one request (Vercel’s default timeout is 5 minutes)
+- Shared helpers stay in `_shared` folders instead of being copied across Zaps
+- Secrets stay in environment variables, not scattered across Zapier accounts
 
-### 1. Install Dependencies
+Some clients still have a thin Zapier or n8n step (for example a trigger that POSTs here, or a leftover “create person in Customer.io”). The heavy lifting belongs in this app.
+
+## How it is organized
+
+```
+app/
+├── api/
+│   ├── <client>/                 # one folder per client
+│   │   ├── <automation>/route.ts
+│   │   └── _shared/              # helpers used only by that client
+│   ├── send-msg-file/            # shared Outlook .msg plugin
+│   └── send-test-email/
+├── highviewtravel/               # small client UIs (e.g. PDF preview)
+├── interlink/
+└── playground/                   # local form previews (CCHealthcare)
+```
+
+A typical flow:
+
+1. CRM, form tool, or add-in sends a POST to `/api/<client>/<automation>`
+2. The route loads records, generates a file, calls another API, or writes fields back
+3. It returns JSON (or a PDF) so the caller can continue or stop
+
+Credentials live in `.env.local` and are usually prefixed by client name (`HIGHVIEWTRAVEL_…`, `TOMCHEI_SHABBOS_…`, `LOWERWATT_…`, and so on). Do not commit that file.
+
+## Clients
+
+### Aspire
+
+Patient intake and follow-up around **Lobbie** (forms) and **ClickUp** (tasks).
+
+| Route                                  | What it does                                                           |
+| -------------------------------------- | ---------------------------------------------------------------------- |
+| `/api/aspire/webhook`                  | Lobbie form-packet webhook → maps completed intake into ClickUp        |
+| `/api/aspire/process-intake`           | Manual/retry processing of a completed intake packet                   |
+| `/api/aspire/clickup-webhook`          | ClickUp `taskUpdated` events for email automations                     |
+| `/api/aspire/email-automations/scan`   | Daily scan of waiting-list / no-tech dates; fires due follow-up emails |
+| `/api/aspire/email-automations/run`    | Run one scheduled follow-up by task id                                 |
+| `/api/aspire/register-webhook`         | Register the Lobbie webhook                                            |
+| `/api/aspire/register-clickup-webhook` | Register the ClickUp webhook                                           |
+
+### CCHealthcare (original project)
+
+Zoho CRM reimbursement forms (expense, mileage, petty cash). The original README described only this client.
+
+`POST /api/cchealthcare` loads a Zoho record, builds a reimbursement PDF, emails the facility (Stampli) and the requester, and creates a **SmartSuite** record. Zoho OAuth setup is documented in `ZOHO_SETUP.md`. Playground form layouts live under `app/playground/cchealthcare/`.
+
+### High View Travel
+
+HubSpot + Formstack booking workflow (much of this used to be Zapier).
+
+| Route                                          | What it does                                                                                      |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `/api/highviewtravel/generateEmailFile`        | On deal `send_form = Send Form`: prefill Formstack, build a booking `.eml`, attach it to the deal |
+| `/api/highviewtravel/auto-fill-penalties`      | Fill default penalty text on the deal from form type                                              |
+| `/api/highviewtravel/submitFormPDF`            | Formstack submission → summary PDF/DOCX, HubSpot deal updates (stage, dates, collaborators)       |
+| `/api/highviewtravel/generateFormPDF`          | Preview-only summary PDF                                                                          |
+| `/api/highviewtravel/passport-submission`      | Attach passport files from Formstack onto the HubSpot deal                                        |
+| `/api/highviewtravel/email-to-deal`            | Parse a booking `.eml` and create a HubSpot deal                                                  |
+| `/api/highviewtravel/email-to-deal/msg`        | Same idea for Outlook `.msg` (prefer `/api/send-msg-file` for the add-in)                         |
+| `/api/highviewtravel/notification-of-new-deal` | Decide whether a new deal’s contact should go into Customer.io                                    |
+| `/api/highviewtravel/getnextwebinar`           | Next Zoom webinar for High View                                                                   |
+
+More detail: `app/api/highviewtravel/generateEmailFile/README.md` and `app/api/highviewtravel/notification-of-new-deal/README.md`. A PDF preview page lives at `/highviewtravel/pdf-preview`.
+
+### Interlink
+
+Outlook add-in to file an email against a **SmartSuite** record.
+
+- UI: `/interlink/outlook-ui`
+- `GET /api/interlink/records?q=` — search records by title
+- `POST /api/interlink/save-email` — upload the email and attachments onto the selected record
+
+### LowerWatt
+
+Utility bills, commissions, and QuickBooks.
+
+| Route                                            | What it does                                                          |
+| ------------------------------------------------ | --------------------------------------------------------------------- |
+| `/api/lowerwatt/bill-extraction-into-smartsuite` | Gemini reads a utility-bill PDF and returns structured fields         |
+| `/api/lowerwatt/attach-pdf-after-extraction`     | Attach the source PDF onto the SmartSuite bill record                 |
+| `/api/lowerwatt/generate-monthly-report`         | Commission HTML + PDF for a rep/month                                 |
+| `/api/lowerwatt/generate-admin-summary-email`    | Admin summary email HTML                                              |
+| `/api/lowerwatt/quickbooks`                      | QuickBooks Web Connector (QBWC) SOAP endpoint for invoice sync/create |
+| `/api/lowerwatt/test-bill-extraction`            | Test harness for bill extraction                                      |
+
+### Project Ninveh
+
+SmartSuite report PDFs (matchmaking / committee data). Each route builds a PDF and writes it back to a SmartSuite file field.
+
+- `/api/projectninveh/simply-book-to-ss` — SimplyBook appointment → SmartSuite singles/shadchan records
+- `/api/projectninveh/singles-pdf`
+- `/api/projectninveh/birthdays`
+- `/api/projectninveh/committee-pdf`
+- `/api/projectninveh/basic-committee-pdf`
+- `/api/projectninveh/partner-advocates-pdf`
+
+### Tomchei Shabbos
+
+Weekly food-package distribution in SmartSuite.
+
+| Route                                           | What it does                                                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------------ |
+| `/api/tomcheishabbos/add-weekly-customers`      | Add weekly (and alternating bi-weekly) customers onto this week’s distribution |
+| `/api/tomcheishabbos/delivery-list`             | Generate a delivery-list PDF for a distribution record                         |
+| `/api/tomcheishabbos/delivery-list-export`      | Pesach delivery-list export PDFs onto a reports record                         |
+| `/api/tomcheishabbos/comparison-report`         | Year-over-year Pesach comparison PDF + CSV                                     |
+| `/api/tomcheishabbos/find-records-to-resume`    | Un-pause customers whose pause window has ended                                |
+| `/api/tomcheishabbos/clear-delivery-list-field` | Clear linked customers on a distribution record                                |
+
+See `app/api/tomcheishabbos/add-weekly-customers/README.md`.
+
+## Shared routes
+
+These are not tied to a single client folder, but are used by add-ins or for testing.
+
+| Route                               | What it does                                                                             |
+| ----------------------------------- | ---------------------------------------------------------------------------------------- |
+| `/api/send-msg-file`                | Outlook plugin: upload a `.msg`, then create a HubSpot deal or High View contact from it |
+| `/api/send-msg-file/get-upload-url` | Presigned Vercel Blob URL for the `.msg` upload                                          |
+| `/api/send-test-email`              | Send a test SMTP email                                                                   |
+| `/api/test-pdf`                     | PDF smoke test                                                                           |
+
+## Quick start
 
 ```bash
 npm install
 ```
 
-### 2. Configure Environment Variables
-
-Copy the `.env.local` file and update it with your credentials:
-
-```env
-# Zoho CRM Configuration
-ZOHO_CLIENT_ID=your_client_id_here
-ZOHO_CLIENT_SECRET=your_client_secret_here
-ZOHO_REFRESH_TOKEN=your_refresh_token_here
-ZOHO_MODULE=Staff_Forms
-
-# Email Configuration (SMTP)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=your_email@gmail.com
-SMTP_PASS=your_app_password_here
-SMTP_FROM=your_email@gmail.com
-```
-
-See `ZOHO_SETUP.md` for detailed instructions on obtaining these credentials.
-
-### 3. Run the Development Server
+Copy `.env.local` from the template below and fill in credentials for the clients you are working on. Then:
 
 ```bash
 npm run dev
 ```
 
-The webhook endpoint will be available at: `http://localhost:3000/api/webhook`
+Routes are at `http://localhost:3000/api/<client>/<automation>`.
 
-### 4. Set Up Zoho Webhook
-
-Configure your Zoho CRM workflow to send POST requests to your endpoint with this body:
-
-```json
-{
-  "id": "7219537000000606001"
-}
-```
-
-See `ZOHO_SETUP.md` for complete Zoho CRM setup instructions.
-
-## API Endpoint
-
-### POST `/api/webhook`
-
-Receives a Zoho CRM record ID, fetches attachments, combines PDFs, and sends email.
-
-**Request Body:**
-
-```json
-{
-  "id": "7219537000000606001"
-}
-```
-
-**Response (Success):**
-
-```json
-{
-  "message": "Successfully processed and sent email",
-  "recordId": "7219537000000606001",
-  "attachmentCount": 5,
-  "pdfCount": 3
-}
-```
-
-**Response (No Attachments):**
-
-```json
-{
-  "message": "No attachments found for this record",
-  "recordId": "7219537000000606001"
-}
-```
-
-**Response (Error):**
-
-```json
-{
-  "error": "Internal server error",
-  "details": "Error message here"
-}
-```
-
-## Project Structure
-
-```
-cchealthcare/
-├── app/
-│   ├── api/
-│   │   └── webhook/
-│   │       └── route.ts          # Main webhook endpoint
-│   ├── layout.tsx
-│   └── page.tsx
-├── .env.local                    # Environment variables (create this)
-├── ZOHO_SETUP.md                 # Zoho CRM setup guide
-├── package.json
-└── README.md
-```
-
-## How It Works
-
-1. **Webhook Receipt**: The endpoint receives a POST request with a Zoho CRM record ID
-2. **Fetch Record**: Queries Zoho CRM API to get record details
-3. **Fetch Attachments**: Retrieves all attachments associated with the record
-4. **Filter PDFs**: Identifies and downloads only PDF attachments
-5. **Combine PDFs**: Uses `pdf-lib` to merge all PDFs into a single document
-6. **Send Email**: Uses nodemailer to send the combined PDF to `mspitzer@tidystack.com`
-
-## Technologies Used
-
-- **Next.js 16** - React framework with API routes
-- **TypeScript** - Type-safe development
-- **pdf-lib** - PDF manipulation (free, no account required)
-- **nodemailer** - Email sending
-- **Zoho CRM API v2** - Fetching records and attachments
-
-## Production Deployment
-
-### Environment Variables
-
-Ensure all environment variables are set in your production environment.
-
-### Deployment Options
-
-- **Vercel** (Recommended for Next.js): [vercel.com](https://vercel.com)
-- **Netlify**: [netlify.com](https://netlify.com)
-- **Docker**: Build and deploy as a container
-- **Traditional hosting**: Node.js server required
-
-### Security Considerations
-
-1. Always use HTTPS in production
-2. Add webhook signature verification for Zoho requests
-3. Never commit `.env.local` to version control
-4. Consider adding rate limiting
-5. Monitor logs for errors and unauthorized access
-
-## Troubleshooting
-
-See `ZOHO_SETUP.md` for common issues and solutions.
-
-### Quick Checks
-
-1. **401 Unauthorized**: Check Zoho credentials in `.env.local`
-2. **No attachments found**: Verify the record has PDF attachments
-3. **Email not sending**: Verify SMTP credentials (use App Password for Gmail)
-4. **Module not found**: Check `ZOHO_MODULE` matches your Zoho CRM API name
-
-## Testing Locally with ngrok
-
-For webhook testing before deployment:
+To receive real webhooks locally, expose the dev server (for example with ngrok) and point the CRM/form tool at that HTTPS URL.
 
 ```bash
-# Terminal 1: Run the app
-npm run dev
-
-# Terminal 2: Expose to internet
 ngrok http 3000
 ```
 
-Use the ngrok HTTPS URL in your Zoho webhook configuration.
+## Environment variables
 
-## Support
+Credentials live in `.env.local` locally and in the Vercel project settings in production. **Do not commit that file.** You only need the groups for the clients you are working on.
 
-For issues related to:
+```env
+# --- CCHealthcare (Zoho CRM + SmartSuite + SMTP) ---
+ZOHO_CLIENT_ID=
+ZOHO_CLIENT_SECRET=
+ZOHO_REFRESH_TOKEN=
+ZOHO_MODULE=                    # default in code: Staff_Forms
+ZOHO_ACCOUNTS_DOMAIN=           # e.g. accounts.zoho.com
+ZOHO_API_DOMAIN=                # e.g. www.zohoapis.com
+# ZOHO_DEBUG=true               # optional: extra Zoho logging
+CCHEALTHCARE_API_PASSWORD=
+SMARTSUITE_API_KEY=             # also used today by Interlink routes
+SMARTSUITE_ACCOUNT_ID=
+SMARTSUITE_TABLE_ID=
 
-- **Zoho CRM API**: [Zoho CRM API Documentation](https://www.zoho.com/crm/developer/docs/api/v2/)
-- **Next.js**: [Next.js Documentation](https://nextjs.org/docs)
-- **pdf-lib**: [pdf-lib Documentation](https://pdf-lib.js.org/)
-- **nodemailer**: [Nodemailer Documentation](https://nodemailer.com/)
+SMTP_HOST=                      # e.g. smtp.office365.com
+SMTP_PORT=587
+SMTP_SECURE=false               # "true" for TLS on connect
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
+
+# --- Tomchei Shabbos ---
+TOMCHEI_SHABBOS_API_PASSWORD=
+TOMCHEI_SHABBOS_SMARTSUITE_API_KEY=
+TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID=
+TOMCHEI_SHABBOS_SMARTSUITE_TABLE_ID=
+TOMCHEI_SHABBOS_SHIPPO_API_KEY=
+
+# --- High View Travel ---
+HIGHVIEWTRAVEL_PASSWORD=
+HIGHVIEWTRAVEL_HUBSPOT_ACCESS_TOKEN=
+HIGHVIEWTRAVEL_HUBSPOT_DEAL_PDF_PROPERTY=
+HIGHVIEWTRAVEL_ZOOM_ACCOUNT_ID=
+HIGHVIEWTRAVEL_ZOOM_CLIENT_SECRET=
+HIGHVIEW_FORMSTACK_PREFILL_TOKEN=
+HIGHVIEWTRAVEL_OPENAI_API_KEY=
+# HIGHVIEWTRAVEL_OPENAI_MODEL=gpt-4o
+# HIGHVIEW_FORMSTACK_FORM_ID=
+# HIGHVIEWTRAVEL_HUBSPOT_PORTAL_ID=
+# HIGHVIEWTRAVEL_HUBSPOT_SALES_PIPELINE_ID=
+# HIGHVIEWTRAVEL_HUBSPOT_PENDING_DEAL_STAGE_ID=
+# HIGHVIEWTRAVEL_HUBSPOT_DEAL_FORM_EMAIL_PROPERTY=
+
+# --- Outlook .msg plugin (shared) ---
+EMAIL_MSG_FILE_PLUGIN_SHARED_SECRET=
+BLOB_READ_WRITE_TOKEN=          # Vercel Blob; used by /api/send-msg-file
+
+# --- Project Ninveh ---
+PROJECT_NINVEH_API_PASSWORD=
+PROJECT_NINVEH_SMARTSUITE_API_KEY=
+PROJECT_NINVEH_SMARTSUITE_ACCOUNT_ID=
+PROJECT_NINVEH_SMARTSUITE_SINGLES_TABLE_ID=
+PROJECT_NINVEH_SMARTSUITE_REPORTS_TABLE_ID=
+PROJECT_NINVEH_SMARTSUITE_COMMITTEE_TABLE_ID=
+PROJECT_NINVEH_SMARTSUITE_PARTNER_ADVOCATES_TABLE_ID=
+PROJECT_NINVEH_SMARTSUITE_REPORTS_RECORD_ID=
+PROJECT_NINVEH_SMARTSUITE_REPORTS_FIELD_ID=
+# PROJECT_NINVEH_SMARTSUITE_APPOINTMENT_TABLE_ID=
+# PROJECT_NINVEH_SMARTSUITE_PARTNER_ADVOCATES_BIRTHDAY_FIELD_ID=
+
+# --- Interlink ---
+# Routes currently read SMARTSUITE_API_KEY / SMARTSUITE_ACCOUNT_ID above.
+INTERLINK_SMARTSUITE_API_KEY=
+INTERLINK_SMARTSUITE_ACCOUNT_ID=
+INTERLINK_SMARTSUITE_APP_ID=
+
+# --- LowerWatt ---
+LOWERWATT_GEMINI_API_KEY=
+LOWERWATT_OPENAI_API_KEY=       # test-bill-extraction only
+LOWERWATT_CLAUDE_API_KEY=       # test-bill-extraction only
+LOWERWATT_SMARTSUITE_API_KEY=
+# GEMINI_BILL_EXTRACTION_MODEL=gemini-3.6-flash
+# OPENAI_BILL_EXTRACTION_MODEL=gpt-4o
+# CLAUDE_BILL_EXTRACTION_MODEL=claude-sonnet-5
+
+# Shared AI keys (optional; LowerWatt uses the LOWERWATT_* keys)
+GEMINI_API_KEY=
+CLAUDE_API_KEY=
+
+# --- Aspire ---
+ASPIRE_LOBBIE_CLIENT_ID=
+ASPIRE_LOBBIE_CLIENT_SECRET=
+ASPIRE_LOBBIE_API_KEY=
+ASPIRE_CLICKUP_API_KEY=
+# ASPIRE_PUBLIC_URL=            # public base URL for webhook registration; VERCEL_URL is used if unset
+```
+
+## Adding a new client
+
+1. Create `app/api/<client>/` (lowercase, no spaces)
+2. Put each automation in its own `route.ts`
+3. Put client-only helpers in `_shared/`
+4. Prefix env vars with the client name
+5. Add a short section for that client in this README
+
+## Stack
+
+- **Next.js 16** (App Router API routes) and **TypeScript**
+- **pdf-lib** / **docx** for generated files
+- **nodemailer** for email
+- **Gemini** (`@google/genai`) for LowerWatt bill extraction
+- **Vercel Blob** for Outlook `.msg` uploads
+- Deployed on **Vercel**
+- The URL of the App in Vercel is `https://tidystack-app.vercel.app/`
+
+Integrations in use today include HubSpot, SmartSuite, Zoho CRM, ClickUp, Lobbie, Formstack, Zoom, QuickBooks Web Connector, and SimplyBook.
 
 ## License
 

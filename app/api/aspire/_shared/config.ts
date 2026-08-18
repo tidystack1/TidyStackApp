@@ -4,6 +4,8 @@ export const LOBBIE_TOKEN_SCOPE = "prod-lobbie-api/partner-api";
 
 export const ASPIRE_ACCOUNT_ID = 533;
 export const ASPIRE_LOCATION_ID = 971;
+export const ASPIRE_GHL_LOBBIE_ID_WEBHOOK_URL =
+  "https://services.leadconnectorhq.com/hooks/r8zc7CHkRaASnHeWG5n0/webhook-trigger/eb508b9f-6fb8-4251-91b0-339ad75d9368";
 export const CLIENT_INTAKE_FORM_TEMPLATE_ID = 25622;
 
 export const CLICKUP_API_BASE = "https://api.clickup.com/api/v2";

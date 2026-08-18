@@ -121,6 +121,32 @@ export async function getPatient(patientId: number): Promise<LobbiePatient> {
   );
 }
 
+export type CreatePatientInput = {
+  firstName: string;
+  lastName: string;
+  email?: string;
+  mobilePhone?: string;
+};
+
+export async function createPatient(
+  input: CreatePatientInput,
+): Promise<LobbiePatient> {
+  const body: Record<string, string> = {
+    firstName: input.firstName,
+    lastName: input.lastName,
+  };
+  if (input.email) body.email = input.email;
+  if (input.mobilePhone) body.mobilePhone = input.mobilePhone;
+
+  return lobbieJson<LobbiePatient>(
+    `/partner/v2/account/${ASPIRE_ACCOUNT_ID}/patient`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 export async function listFormPackets(cursor?: string): Promise<{
   formPackets: LobbieFormPacket[];
   nextCursor: string | null;
