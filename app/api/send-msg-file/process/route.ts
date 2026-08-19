@@ -233,7 +233,10 @@ async function downloadMsgBuffer(msgUrl: string): Promise<Buffer> {
  * Inline HubSpot deal flow (no internal API hop): parse .msg, AI-extract
  * booking details (text + images), then create a HubSpot deal.
  */
-async function processHubSpotDeal(msgUrl: string): Promise<{
+async function processHubSpotDeal(
+  msgUrl: string,
+  triggeredBy?: string,
+): Promise<{
   payload: Record<string, unknown>;
   status: number;
 }> {
@@ -246,7 +249,7 @@ async function processHubSpotDeal(msgUrl: string): Promise<{
 
   const parsed = await timed("parseMsg", async () => parseMsg(rawMsg));
   console.info(
-    `[send-msg-file/process] hubspot-deal images=${parsed.images.length} subjectLen=${parsed.subject.length} plainTextLen=${parsed.plainText.length}`,
+    `[send-msg-file/process] hubspot-deal images=${parsed.images.length} subjectLen=${parsed.subject.length} plainTextLen=${parsed.plainText.length} triggeredBy=${triggeredBy ?? "none"}`,
   );
 
   const booking = await timed("extractBookingFromEmail", () =>
@@ -254,7 +257,7 @@ async function processHubSpotDeal(msgUrl: string): Promise<{
   );
 
   const deal = await timed("createHubSpotDealFromBooking", () =>
-    createHubSpotDealFromBooking(booking, parsed.from, parsed.to),
+    createHubSpotDealFromBooking(booking, parsed.from, triggeredBy ?? ""),
   );
   console.info(
     `[send-msg-file/process] hubspot-deal created dealId=${deal.dealId} contactId=${deal.contactId ?? "none"} contactAssociated=${deal.contactAssociated}`,
@@ -415,7 +418,7 @@ export async function POST(request: NextRequest) {
     if (category === CATEGORY_HUBSPOT_DEAL) {
       console.info("[send-msg-file/process] starting processHubSpotDeal");
       const { payload, status } = await timed("processHubSpotDeal", () =>
-        processHubSpotDeal(msgUrl),
+        processHubSpotDeal(msgUrl, triggeredBy),
       );
       if (status >= 200 && status < 300) {
         await timed("deleteUploadedMsgBlob", () =>

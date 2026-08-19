@@ -205,7 +205,8 @@ export type CreateDealResult = {
 export async function createHubSpotDealFromBooking(
   booking: BookingExtraction,
   fromHeader: string,
-  toHeader: string,
+  /** Email(s) used to look up the HubSpot deal owner (To header or plugin triggeredBy). */
+  ownerCandidate: string,
 ): Promise<CreateDealResult> {
   const token = getHubSpotToken();
   const contactEmail = extractEmailAddress(fromHeader);
@@ -214,7 +215,10 @@ export async function createHubSpotDealFromBooking(
   }
 
   const { pipelineId, stageId } = resolvePipelineAndStage();
-  const { ownerId, ownerEmail } = await resolveOwnerFromToHeader(toHeader, token);
+  const { ownerId, ownerEmail } = await resolveOwnerFromToHeader(
+    ownerCandidate,
+    token,
+  );
   const properties = buildDealProperties(
     booking,
     pipelineId,
