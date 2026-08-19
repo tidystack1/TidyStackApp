@@ -18,6 +18,8 @@ const PACKAGE_TYPE_FIELD_ID = "sa31ff4bb5";
 const PACKAGE_TYPE_VALUE_IDS = ["JUOoZ", "H7PsX"];
 const BIWEEKLY_FIELD_ID = "s2e2f18fd2";
 const WEEKLY_EXCLUDE_FLAG_FIELD_ID = "sff7c2e6fd";
+const PAUSE_FROM_FIELD_ID = "sbe3faea5e";
+const PAUSE_UNTIL_FIELD_ID = "sf07be7c13";
 
 const LIST_PAGE_SIZE = 1000;
 
@@ -106,6 +108,52 @@ function isYomTovDistribution(record: SmartSuiteRecord): boolean {
   return record[YOM_TOV_DISTRIBUTION_FIELD_ID] === true;
 }
 
+function toDateOnly(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const isoMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (isoMatch) return isoMatch[1];
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10);
+    }
+    return null;
+  }
+  if (isRecord(value) && value.date != null) {
+    return toDateOnly(value.date);
+  }
+  return null;
+}
+
+function isPausedForPackageDate(
+  customer: SmartSuiteRecord,
+  packageDate: string | null,
+): boolean {
+  if (!packageDate) return false;
+  const pauseFrom = toDateOnly(customer[PAUSE_FROM_FIELD_ID]);
+  const pauseUntil = toDateOnly(customer[PAUSE_UNTIL_FIELD_ID]);
+  if (!pauseFrom || !pauseUntil) return false;
+  return pauseFrom <= packageDate && packageDate <= pauseUntil;
+}
+
+function excludePausedCustomers(
+  customers: SmartSuiteRecord[],
+  packageDate: string | null,
+): { included: SmartSuiteRecord[]; excludedCount: number } {
+  const included: SmartSuiteRecord[] = [];
+  let excludedCount = 0;
+  for (const customer of customers) {
+    if (isPausedForPackageDate(customer, packageDate)) {
+      excludedCount += 1;
+      continue;
+    }
+    included.push(customer);
+  }
+  return { included, excludedCount };
+}
+
 function weeklyCustomerFilter(isYomTov: boolean): SmartSuiteFilter {
   return {
     operator: "and",
@@ -163,6 +211,14 @@ function biWeeklyCustomerFilter(): SmartSuiteFilter {
   };
 }
 
+function isRetryableFetchError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = `${error.message} ${error.cause ?? ""}`;
+  return /EAI_AGAIN|ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|UND_ERR|fetch failed|network/i.test(
+    message,
+  );
+}
+
 async function smartSuiteFetch({
   apiKey,
   accountId,
@@ -176,24 +232,57 @@ async function smartSuiteFetch({
   method: "GET" | "POST" | "PATCH";
   body?: unknown;
 }): Promise<unknown> {
-  const response = await fetch(`${SMARTSUITE_API_BASE}${path}`, {
-    method,
-    headers: {
-      Authorization: `Token ${apiKey}`,
-      "ACCOUNT-ID": accountId,
-      "Content-Type": "application/json",
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
+  const url = `${SMARTSUITE_API_BASE}${path}`;
+  const maxAttempts = 4;
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(
-      `SmartSuite ${method} ${path} failed: ${response.status} ${text}`,
-    );
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          "ACCOUNT-ID": accountId,
+          "Content-Type": "application/json",
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+
+      if (response.status === 429 || response.status >= 500) {
+        const text = await response.text().catch(() => "");
+        if (attempt < maxAttempts) {
+          console.warn(
+            `[TOMCHEI_SHABBOS] SmartSuite ${method} ${path} ${response.status}, retry ${attempt}/${maxAttempts}`,
+          );
+          await sleep(500 * 2 ** (attempt - 1));
+          continue;
+        }
+        throw new Error(
+          `SmartSuite ${method} ${path} failed: ${response.status} ${text}`,
+        );
+      }
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(
+          `SmartSuite ${method} ${path} failed: ${response.status} ${text}`,
+        );
+      }
+
+      return response.json();
+    } catch (error) {
+      if (attempt < maxAttempts && isRetryableFetchError(error)) {
+        console.warn(
+          `[TOMCHEI_SHABBOS] SmartSuite ${method} ${path} network error, retry ${attempt}/${maxAttempts}:`,
+          error instanceof Error ? error.message : error,
+        );
+        await sleep(500 * 2 ** (attempt - 1));
+        continue;
+      }
+      throw error;
+    }
   }
 
-  return response.json();
+  throw new Error(`SmartSuite ${method} ${path} failed after ${maxAttempts} attempts`);
 }
 
 async function getDistributionSchedule({
@@ -361,6 +450,7 @@ export async function POST(request: NextRequest) {
       recordId,
     });
     const isYomTov = isYomTovDistribution(distribution);
+    const packageDate = toDateOnly(distribution[DATE_FIELD_ID]);
     const existingIds = asIdArray(distribution[LINKED_CUSTOMERS_FIELD_ID]);
 
     const weeklyCustomers = await listAllRecords({
@@ -369,7 +459,11 @@ export async function POST(request: NextRequest) {
       tableId: CUSTOMERS_TABLE_ID,
       filter: weeklyCustomerFilter(isYomTov),
     });
-    const weeklyIds = weeklyCustomers.map((customer) => customer.id);
+    const weeklyAfterPause = excludePausedCustomers(
+      weeklyCustomers,
+      packageDate,
+    );
+    const weeklyIds = weeklyAfterPause.included.map((customer) => customer.id);
     const afterWeeklyIds = uniqueIds(existingIds, weeklyIds);
 
     await patchLinkedCustomers({
@@ -395,7 +489,13 @@ export async function POST(request: NextRequest) {
       tableId: CUSTOMERS_TABLE_ID,
       filter: biWeeklyCustomerFilter(),
     });
-    const biWeeklyIds = biWeeklyCustomers.map((customer) => customer.id);
+    const biWeeklyAfterPause = excludePausedCustomers(
+      biWeeklyCustomers,
+      packageDate,
+    );
+    const biWeeklyIds = biWeeklyAfterPause.included.map(
+      (customer) => customer.id,
+    );
     const biWeeklyToAdd = biWeeklyIds.filter((id) => !lastWeekIdSet.has(id));
     const biWeeklySkipped = biWeeklyIds.length - biWeeklyToAdd.length;
 
@@ -421,10 +521,13 @@ export async function POST(request: NextRequest) {
         recordId,
         title: distribution.title ?? null,
         isYomTovDistribution: isYomTov,
+        packageDate,
         weeklyCustomersFound: weeklyIds.length,
+        weeklyExcludedPaused: weeklyAfterPause.excludedCount,
         lastWeekRecordId: lastWeek?.id ?? null,
         lastWeekTitle: lastWeek?.title ?? null,
         biWeeklyCustomersFound: biWeeklyIds.length,
+        biWeeklyExcludedPaused: biWeeklyAfterPause.excludedCount,
         biWeeklySkippedAlreadyOnLastWeek: biWeeklySkipped,
         biWeeklyAdded: biWeeklyToAdd.length,
         linkedCustomerCount,
