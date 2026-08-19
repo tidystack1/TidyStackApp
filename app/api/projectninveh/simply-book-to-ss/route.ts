@@ -430,13 +430,25 @@ function* fieldCandidates(
   }
 }
 
-function suggestionsValue(booking: Record<string, unknown>): string | undefined {
+function suggestionsMatch(booking: Record<string, unknown>): {
+  value?: string;
+  label?: string;
+} {
+  const directKeys = ["Suggestions", "suggestions"] as const;
+  for (const key of directKeys) {
+    const extracted = fieldText(booking[key]);
+    if (extracted) return { value: extracted, label: key };
+  }
   for (const { label, value } of fieldCandidates(booking)) {
     if (!isSuggestionsLabel(label)) continue;
     const extracted = fieldText(value);
-    if (extracted) return extracted;
+    if (extracted) return { value: extracted, label };
   }
-  return undefined;
+  return {};
+}
+
+function suggestionsValue(booking: Record<string, unknown>): string | undefined {
+  return suggestionsMatch(booking).value;
 }
 
 function cleanProviderName(raw: unknown): string {
@@ -992,6 +1004,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const suggestions = suggestionsMatch(booking);
     const appointmentId = await createRecord({
       apiKey,
       accountId,
@@ -1043,6 +1056,9 @@ export async function POST(req: NextRequest) {
         resume: Boolean(resumeFile),
         photo: Boolean(photoFile),
       },
+      suggestions: suggestions.value ?? null,
+      suggestions_label: suggestions.label ?? null,
+      booking_keys: Object.keys(booking),
       warnings,
     });
   } catch (error) {
