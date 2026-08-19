@@ -160,15 +160,26 @@ function extractBooking(body: unknown): Record<string, unknown> {
   for (let i = 0; i < 4; i++) {
     current = parseMaybeJson(current);
     if (!isRecord(current)) break;
-    if (typeof current.payload === "string" || isRecord(current.payload)) {
-      current = current.payload;
+    const nested =
+      typeof current.payload === "string" || isRecord(current.payload)
+        ? current.payload
+        : typeof current.data === "string" || isRecord(current.data)
+          ? current.data
+          : undefined;
+    if (nested === undefined) break;
+    const parent = current;
+    const parsed = parseMaybeJson(nested);
+    if (!isRecord(parsed)) {
+      current = nested;
       continue;
     }
-    if (typeof current.data === "string" || isRecord(current.data)) {
-      current = current.data;
-      continue;
+    const merged: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(parent)) {
+      if (key === "payload" || key === "data") continue;
+      merged[key] = value;
     }
-    break;
+    Object.assign(merged, parsed);
+    current = merged;
   }
   current = parseMaybeJson(current);
   if (!isRecord(current)) {
@@ -341,12 +352,91 @@ function birthdayValue(booking: Record<string, unknown>): string | undefined {
   return nonempty(booking.birthday_single) ?? nonempty(booking.birthday_self);
 }
 
+const SUGGESTIONS_FIELD_LABEL =
+  "Please include the names of the individuals in an effort to allow the shadchanim to make the most of your time. :";
+
+const SUGGESTIONS_ALIASES = new Set([
+  "suggestions",
+  "namesofsuggestions",
+  "suggestionnames",
+]);
+
+const SUGGESTIONS_NEEDLES = [
+  fold(SUGGESTIONS_FIELD_LABEL),
+  "pleaseincludethenamesoftheindividuals",
+  "shadchanimtomakethemostofyourtime",
+];
+
+function fieldText(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => fieldText(item))
+      .filter((part): part is string => Boolean(part));
+    return parts.length ? parts.join(", ") : undefined;
+  }
+  if (isRecord(value)) {
+    return (
+      nonempty(value.value) ??
+      nonempty(value.display_value) ??
+      nonempty(value.sys_root) ??
+      nonempty(value.text) ??
+      nonempty(value.answer)
+    );
+  }
+  return nonempty(value);
+}
+
+function isSuggestionsLabel(label: string): boolean {
+  const folded = fold(label);
+  if (!folded) return false;
+  if (SUGGESTIONS_ALIASES.has(folded)) return true;
+  return SUGGESTIONS_NEEDLES.some((needle) => folded === needle || folded.includes(needle));
+}
+
+function* fieldCandidates(
+  booking: Record<string, unknown>,
+): Generator<{ label: string; value: unknown }> {
+  for (const [key, value] of Object.entries(booking)) {
+    yield { label: key, value };
+  }
+  const collections = [
+    booking.additional_fields,
+    booking.additionalFields,
+    booking.intake_fields,
+    booking.intakeFields,
+    booking.custom_fields,
+    booking.customFields,
+    booking.fields,
+  ];
+  for (const collection of collections) {
+    if (Array.isArray(collection)) {
+      for (const item of collection) {
+        if (!isRecord(item)) continue;
+        const label = text(
+          item.name ?? item.field_name ?? item.title ?? item.label ?? item.field ?? item.id,
+        );
+        yield { label, value: item.value ?? item };
+      }
+    } else if (isRecord(collection)) {
+      for (const [key, value] of Object.entries(collection)) {
+        if (isRecord(value)) {
+          const label = text(value.name ?? value.field_name ?? value.title ?? value.label ?? key);
+          yield { label, value: value.value ?? value };
+        } else {
+          yield { label: key, value };
+        }
+      }
+    }
+  }
+}
+
 function suggestionsValue(booking: Record<string, unknown>): string | undefined {
-  return (
-    nonempty(booking.suggestions) ??
-    nonempty(booking.names_of_suggestions) ??
-    nonempty(booking.suggestion_names)
-  );
+  for (const { label, value } of fieldCandidates(booking)) {
+    if (!isSuggestionsLabel(label)) continue;
+    const extracted = fieldText(value);
+    if (extracted) return extracted;
+  }
+  return undefined;
 }
 
 function cleanProviderName(raw: unknown): string {
