@@ -300,6 +300,7 @@ export async function downloadFormFile(filePath: string): Promise<Uint8Array | n
     if (bytes.byteLength > 0) return bytes;
   }
 
+    console.error(`[lobbie] downloadFormFile failed for ${filePath}`);
   return null;
 }
 
