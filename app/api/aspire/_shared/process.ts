@@ -16,6 +16,7 @@ import {
 import { upsertClickUpClient } from "./clickup";
 import {
   downloadFormFile,
+  findIntakePacketForPatient,
   getFormPacket,
   getFormPacketForms,
   getPatient,
@@ -26,6 +27,7 @@ import type {
   JsonObject,
   LobbieFormPacket,
   LobbieWebhookEnvelope,
+  MappedIntake,
 } from "./types";
 
 export function webhookAccessToken(): string {
@@ -139,6 +141,71 @@ export async function processIntakePacket(input: {
     skipped: false,
     packetId: packet.id,
     formId: intakeForm?.id,
+    clickup,
+  };
+}
+
+export type PatientClickUpFallbacks = {
+  clientFirstName?: string;
+  clientLastName?: string;
+  address?: string;
+  insurance?: string;
+};
+
+function applyFallbacks(
+  mapped: MappedIntake,
+  fallbacks?: PatientClickUpFallbacks,
+): MappedIntake {
+  if (!fallbacks) return mapped;
+  return {
+    ...mapped,
+    clientFirstName: mapped.clientFirstName || fallbacks.clientFirstName || "",
+    clientLastName: mapped.clientLastName || fallbacks.clientLastName || "",
+    address: mapped.address || fallbacks.address || "",
+    insurance: mapped.insurance || fallbacks.insurance || "",
+  };
+}
+
+export async function processPatientToClickUp(input: {
+  patientId: number;
+  fallbacks?: PatientClickUpFallbacks;
+}): Promise<{
+  skipped: boolean;
+  reason?: string;
+  patientId: number;
+  packetId?: number;
+  formId?: number;
+  clickup?: { taskId: string; taskUrl: string; created: boolean };
+}> {
+  const patient = await getPatient(input.patientId);
+  const packet = await findIntakePacketForPatient(
+    input.patientId,
+    CLIENT_INTAKE_FORM_TEMPLATE_ID,
+  );
+
+  let mapped: MappedIntake = mapIntakeFields([], patient);
+  let formId: number | undefined;
+
+  if (packet) {
+    const forms = await getFormPacketForms(packet.id);
+    const intakeForm = findIntakeForm(forms, CLIENT_INTAKE_FORM_TEMPLATE_ID);
+    mapped = mapIntakeFields(intakeForm?.answers ?? [], patient);
+    formId = intakeForm?.id;
+  }
+
+  mapped = applyFallbacks(mapped, input.fallbacks);
+  const files = await downloadMappedFiles(mapped);
+  const clickup = await upsertClickUpClient({
+    mapped,
+    patientId: input.patientId,
+    files,
+  });
+
+  return {
+    skipped: false,
+    patientId: input.patientId,
+    packetId: packet?.id,
+    formId,
     clickup,
   };
 }

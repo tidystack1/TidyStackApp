@@ -167,6 +167,40 @@ export async function listFormPackets(cursor?: string): Promise<{
   };
 }
 
+function packetsFromUnknown(value: unknown): LobbieFormPacket[] {
+  const lists: unknown[] = [];
+  if (Array.isArray(value)) {
+    lists.push(value);
+  } else if (isRecord(value)) {
+    for (const key of ["formPackets", "items", "data"]) {
+      if (Array.isArray(value[key])) lists.push(value[key]);
+    }
+  }
+
+  return lists
+    .flat()
+    .map((item) => parsePacketFromUnknown(item))
+    .filter((packet): packet is LobbieFormPacket => packet != null);
+}
+
+function pickLatestIntakePacket(
+  packets: LobbieFormPacket[],
+  templateId: number,
+): LobbieFormPacket | null {
+  const matching = packets.filter((packet) =>
+    (packet.formTemplateIds ?? []).includes(templateId),
+  );
+  if (!matching.length) return null;
+
+  const completed = matching.filter((packet) => Boolean(packet.completedAt));
+  const pool = completed.length ? completed : matching;
+  return [...pool].sort((a, b) => {
+    const aTime = a.completedAt || a.updatedAt || a.createdAt || "";
+    const bTime = b.completedAt || b.updatedAt || b.createdAt || "";
+    return bTime.localeCompare(aTime);
+  })[0] ?? null;
+}
+
 export async function findLatestCompletedIntakePacket(
   templateId: number,
 ): Promise<LobbieFormPacket | null> {
@@ -183,6 +217,48 @@ export async function findLatestCompletedIntakePacket(
     cursor = nextCursor;
   }
   return null;
+}
+
+export async function findIntakePacketForPatient(
+  patientId: number,
+  templateId: number,
+): Promise<LobbieFormPacket | null> {
+  const directPaths = [
+    `/partner/v2/account/${ASPIRE_ACCOUNT_ID}/patient/${patientId}/form-packet`,
+    `/partner/v2/account/${ASPIRE_ACCOUNT_ID}/location/${ASPIRE_LOCATION_ID}/form-packet?patientId=${patientId}&limit=50`,
+  ];
+
+  for (const path of directPaths) {
+    try {
+      const packets = packetsFromUnknown(await lobbieJson<unknown>(path));
+      const forPatient = packets.filter(
+        (packet) => packet.patientId == null || packet.patientId === patientId,
+      );
+      const filtered =
+        packets.length > 0 && packets.every((packet) => packet.patientId === patientId);
+      if (!filtered && forPatient.length === 0) continue;
+      const match = pickLatestIntakePacket(forPatient, templateId);
+      if (match) return match;
+      if (filtered) return null;
+    } catch {
+      continue;
+    }
+  }
+
+  let cursor: string | undefined;
+  let fallback: LobbieFormPacket | null = null;
+  for (let page = 0; page < 40; page += 1) {
+    const { formPackets, nextCursor } = await listFormPackets(cursor);
+    const match = pickLatestIntakePacket(
+      formPackets.filter((packet) => packet.patientId === patientId),
+      templateId,
+    );
+    if (match?.completedAt) return match;
+    if (match && !fallback) fallback = match;
+    if (!nextCursor) break;
+    cursor = nextCursor;
+  }
+  return fallback;
 }
 
 export async function listWebhooks(): Promise<JsonObject[]> {
