@@ -54,7 +54,7 @@ function corsHeaders() {
 }
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -102,6 +102,47 @@ function extractRecordId(body: unknown): string | null {
     return body.body.recordId || null;
   }
   return null;
+}
+
+function appOrigin(request: NextRequest): string {
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const forwardedProto = request.headers.get("x-forwarded-proto") ?? "https";
+  const host = forwardedHost || request.headers.get("host");
+  if (host) return `${forwardedProto}://${host.split(",")[0].trim()}`;
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) {
+    return vercelUrl.startsWith("http") ? vercelUrl : `https://${vercelUrl}`;
+  }
+  return request.nextUrl.origin;
+}
+
+async function callDeliveryListEndpoint({
+  origin,
+  distributionId,
+}: {
+  origin: string;
+  distributionId: string;
+}): Promise<unknown> {
+  const password = requireEnv("TOMCHEI_SHABBOS_API_PASSWORD");
+  const url = new URL("/api/tomcheishabbos/delivery-list", origin).toString();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: distributionId, password }),
+  });
+  const text = await response.text();
+  let body: unknown = text;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // keep raw text
+  }
+  if (!response.ok) {
+    const details =
+      typeof body === "string" ? body : JSON.stringify(body);
+    throw new Error(`delivery-list failed: ${response.status} ${details}`);
+  }
+  return body;
 }
 
 function isYomTovDistribution(record: SmartSuiteRecord): boolean {
@@ -515,6 +556,12 @@ export async function POST(request: NextRequest) {
       linkedCustomerCount = currentIds.length;
     }
 
+    await sleep(1000);
+    const deliveryList = await callDeliveryListEndpoint({
+      origin: appOrigin(request),
+      distributionId: recordId,
+    });
+
     return NextResponse.json(
       {
         success: true,
@@ -531,6 +578,7 @@ export async function POST(request: NextRequest) {
         biWeeklySkippedAlreadyOnLastWeek: biWeeklySkipped,
         biWeeklyAdded: biWeeklyToAdd.length,
         linkedCustomerCount,
+        deliveryList,
       },
       { status: 200, headers: corsHeaders() },
     );
