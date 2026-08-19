@@ -259,6 +259,13 @@ function fullName(first: string, last: string): string {
   return [first, last].filter(Boolean).join(" ");
 }
 
+function possessive(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return trimmed;
+  if (/s$/i.test(trimmed)) return `${trimmed}'`;
+  return `${trimmed}'s`;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -278,12 +285,12 @@ function waitingListCopy(fields: ClientEmailFields): { subject: string; body: st
   const guardian = fullName(fields.guardian1FirstName, fields.guardian1LastName);
   const client = fields.clientFirstName || "your child";
   return {
-    subject: `Update on ${client} ABA Services`,
+    subject: `Update on ${possessive(client)} ABA Services`,
     body: `Hi ${guardian || "there"},
 
 This is Rikki from Aspire ABA Therapy. I hope you are doing well!
 
-We are excited to provide you with an update regarding ${client} ABA services! ${client} remains on our BCBA waiting list, and our team is actively working to identify an amazing BCBA who will be a great fit for ${client} and your family.
+We are excited to provide you with an update regarding ${possessive(client)} ABA services! ${client} remains on our BCBA waiting list, and our team is actively working to identify an amazing BCBA who will be a great fit for ${client} and your family.
 
 We understand how important it is to get services started, and we truly appreciate your patience as we work toward the next step. We will continue to keep you updated as we have more information.
 
@@ -301,18 +308,18 @@ function bcbaAssignedCopy(fields: ClientEmailFields): { subject: string; body: s
   const client = fields.clientFirstName || "your child";
   const bcba = fields.assignedBcbaName || "your assigned BCBA";
   return {
-    subject: `An Exciting Update in ${client} ABA Journey`,
+    subject: `An Exciting Update in ${possessive(client)} ABA Journey`,
     body: `Hi ${guardian || "there"},
 
 This is Rikki at Aspire ABA Therapy. I hope you are doing well!
 
-We are excited to share that a BCBA has been assigned to ${client} case!
+We are excited to share that a BCBA has been assigned to ${possessive(client)} case!
 
-We are looking forward to beginning this next step and connecting you with ${client} BCBA. Please see their information below.
+We are looking forward to beginning this next step and connecting you with ${possessive(client)} BCBA. Please see their information below.
 
 Name: ${bcba}
 
-They will be working closely with your family to support ${client} individual needs. We truly appreciate your trust in Aspire ABA Therapy and look forward to getting started!
+They will be working closely with your family to support ${possessive(client)} individual needs. We truly appreciate your trust in Aspire ABA Therapy and look forward to getting started!
 
 Welcome to Aspire ABA Therapy!
 

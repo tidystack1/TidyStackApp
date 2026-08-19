@@ -41,6 +41,11 @@ const NO_TECH_DUE: Array<{ automation: EmailAutomationId; days: number }> = [
   { automation: EMAIL_AUTOMATIONS.noTechDay25, days: 25 },
 ];
 
+// TESTING: n8n runs hourly. Treat the thresholds above as hours instead of
+// calendar days (e.g. waiting-list day 10 = 10 hours). Switch back to days:
+// set this to false.
+const USE_HOURS_INSTEAD_OF_DAYS_FOR_TESTING = true;
+
 let cachedFieldIds: AutomationFieldIds | null = null;
 
 function fieldById(
@@ -93,6 +98,18 @@ export function calendarDaysSince(
   return Math.round(
     (Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000,
   );
+}
+
+function hoursElapsed(startedAtMs: number, nowMs = Date.now()): number {
+  return Math.floor((nowMs - startedAtMs) / 3_600_000);
+}
+
+function scheduleElapsed(startedAtMs: number): number {
+  // TESTING: hours instead of days so hourly n8n scans can fire follow-ups.
+  // Switch back: USE_HOURS_INSTEAD_OF_DAYS_FOR_TESTING = false.
+  return USE_HOURS_INSTEAD_OF_DAYS_FOR_TESTING
+    ? hoursElapsed(startedAtMs)
+    : calendarDaysSince(startedAtMs);
 }
 
 async function findOrCreateField(
@@ -289,7 +306,7 @@ export async function collectDueEmailAutomations(): Promise<{
       unstamped.push({ taskId: task.id, kind: "waiting_list" });
     }
 
-    const daysElapsed = calendarDaysSince(startedAtMs);
+    const daysElapsed = scheduleElapsed(startedAtMs);
     for (const automation of dueWaitingListAutomations(daysElapsed, state.sent)) {
       due.push({
         taskId: task.id,
@@ -313,7 +330,7 @@ export async function collectDueEmailAutomations(): Promise<{
       unstamped.push({ taskId: task.id, kind: "no_tech" });
     }
 
-    const daysElapsed = calendarDaysSince(startedAtMs);
+    const daysElapsed = scheduleElapsed(startedAtMs);
     for (const automation of dueNoTechAutomations(daysElapsed, state.sent)) {
       due.push({
         taskId: task.id,

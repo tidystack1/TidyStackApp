@@ -15,7 +15,6 @@ export async function GET() {
     message: "Aspire Lobbie webhook is ready. Lobbie should POST form-packet events here.",
   });
 }
-
 export async function POST(request: NextRequest) {
   try {
     const token =

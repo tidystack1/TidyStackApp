@@ -15,7 +15,8 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     message:
-      "n8n should POST here on a daily schedule. This app checks ClickUp waiting-list and no-tech dates and webhooks n8n for any due emails.",
+      // TESTING: n8n is hourly; follow-up thresholds are hours not days. Switch back with the scan schedule logic.
+      "n8n should POST here on an hourly schedule (testing; production is daily). This app checks ClickUp waiting-list and no-tech dates and webhooks n8n for any due emails.",
   });
 }
 
