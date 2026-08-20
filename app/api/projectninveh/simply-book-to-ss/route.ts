@@ -792,6 +792,99 @@ function recordHasFiles(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0;
 }
 
+/* ---------------------------------------------------------------------------
+ * Fuzzy shadchan matching.
+ *
+ * The SimplyBook provider list and the SHADCHAN table are maintained by hand,
+ * so spellings drift ("Maargalit"/"Margalit", "Rivky"/"Rivkie"), middle names
+ * appear on one side only ("Freyda Leah Falik"/"Freyda Falik"), and honorifics
+ * come and go ("Rabbi Meir Levi"/"Meir Levi"). The shadchan list is small and
+ * every name is unique, so approximate matching is safe here.
+ *
+ * NOTE: deliberately NOT used for Singles - merging two different singles
+ * because their names look alike would be far worse than creating a duplicate.
+ * ------------------------------------------------------------------------- */
+
+const HONORIFIC = /^(rabbi|reb|rav|harav|rebbetzin|mrs|mr|ms|dr)$/;
+
+const SHADCHAN_MATCH_THRESHOLD = 0.82;
+
+function nameTokens(value: string): string[] {
+  return value
+    .split(/[\s,]+/)
+    .map((part) => fold(part))
+    .filter((part) => part.length > 0 && !HONORIFIC.test(part));
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev: number[] = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const curr: number[] = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[b.length];
+}
+
+function similarity(a: string, b: string): number {
+  const max = Math.max(a.length, b.length);
+  if (max === 0) return 1;
+  return 1 - levenshtein(a, b) / max;
+}
+
+/** Every spelling of a SHADCHAN record's name we can compare against. */
+function shadchanNameVariants(record: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const title = text(record.title);
+  if (title) out.push(title);
+  const nameField = record[SHADCHAN_NAME_FIELD];
+  if (isRecord(nameField)) {
+    const joined = `${text(nameField.first_name)} ${text(nameField.last_name)}`.trim();
+    if (joined) out.push(joined);
+    const root = text(nameField.sys_root);
+    if (root) out.push(root);
+  } else {
+    const plain = text(nameField);
+    if (plain) out.push(plain);
+  }
+  return out;
+}
+
+/** 0 = no match, 1 = exact once normalised. */
+function shadchanScore(provider: string, record: Record<string, unknown>): number {
+  const providerTokens = nameTokens(provider);
+  const providerJoined = providerTokens.join("");
+  if (!providerJoined) return 0;
+
+  let best = 0;
+  for (const variant of shadchanNameVariants(record)) {
+    const recordTokens = nameTokens(variant);
+    const recordJoined = recordTokens.join("");
+    if (!recordJoined) continue;
+
+    if (recordJoined === providerJoined) return 1;
+
+    // One side carries an extra middle name: "Freyda Leah Falik" / "Freyda Falik"
+    const [small, large] =
+      providerTokens.length <= recordTokens.length
+        ? [providerTokens, recordTokens]
+        : [recordTokens, providerTokens];
+    if (small.length >= 2 && small.every((token) => large.includes(token))) {
+      best = Math.max(best, 0.95);
+      continue;
+    }
+
+    best = Math.max(best, similarity(providerJoined, recordJoined));
+  }
+  return best;
+}
+
 function namesMatch(
   record: Record<string, unknown>,
   first: string,
@@ -851,7 +944,6 @@ async function findShadchanId({
 }): Promise<string | undefined> {
   const cleaned = cleanProviderName(providerName);
   if (!cleaned) return undefined;
-  const { first, last } = splitName(cleaned);
   const items = await listRecords({
     apiKey,
     accountId,
@@ -859,12 +951,23 @@ async function findShadchanId({
     filter: { operator: "and", fields: [] },
     limit: 200,
   });
-  const match = items.find((item) => {
-    if (namesMatch(item, first, last, SHADCHAN_NAME_FIELD)) return true;
-    const title = fold(text(item.title));
-    return title.length > 0 && title === fold(cleaned);
-  });
-  return match && typeof match.id === "string" ? match.id : undefined;
+
+  const scored = items
+    .map((item) => ({ item, score: shadchanScore(cleaned, item) }))
+    .filter((entry) => entry.score >= SHADCHAN_MATCH_THRESHOLD)
+    .sort((a, b) => b.score - a.score);
+
+  if (!scored.length) return undefined;
+
+  // Two records scoring identically means we cannot tell them apart - better to
+  // leave the link empty and warn than to attach the appointment to the wrong
+  // shadchan.
+  if (scored.length > 1 && scored[0].score < 1 && scored[1].score === scored[0].score) {
+    return undefined;
+  }
+
+  const match = scored[0].item;
+  return typeof match.id === "string" ? match.id : undefined;
 }
 
 function singlesIncomingFields(
