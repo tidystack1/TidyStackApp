@@ -236,7 +236,7 @@ async function sendRequesterEmail({
         typeof record["Total_Miles"] === "number"
           ? record["Total_Miles"]
           : Number(record["Total_Miles"]) || 0;
-      amountValue = +(milesNum * 0.725).toFixed(2);
+      amountValue = +(milesNum * 0.76).toFixed(2);
     } else if (Array.isArray(record["Mileage_Reimbursement"])) {
       const rows = record["Mileage_Reimbursement"] as Array<
         Record<string, unknown>
@@ -247,7 +247,7 @@ async function sendRequesterEmail({
         const mn = typeof m === "number" ? m : Number(m) || 0;
         totalMiles += mn;
       }
-      amountValue = +(totalMiles * 0.725).toFixed(2);
+      amountValue = +(totalMiles * 0.76).toFixed(2);
     }
   } else {
     // expense-reimbursement or petty-cash

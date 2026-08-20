@@ -1329,7 +1329,7 @@ export async function buildReimbursementPdf(
 
   if (formType === "mileage-reimbursement") {
     const totalMiles = calculateTotalMiles(subformRows as MileageRow[]);
-    const totalAmount = totalMiles * 0.725;
+    const totalAmount = totalMiles * 0.76;
     recordInfo.totalMiles = totalMiles;
     recordInfo.totalMilesMultiplied = totalAmount;
   }
