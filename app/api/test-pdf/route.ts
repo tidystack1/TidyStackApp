@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     // Calculate totals for mileage reimbursement from subform rows
     if (formType === "mileage-reimbursement") {
       const totalMiles = calculateTotalMiles(subformRows as MileageRow[]);
-      const totalAmount = totalMiles * 0.725;
+      const totalAmount = totalMiles * 0.76;
       recordInfo.totalMiles = totalMiles;
       recordInfo.totalMilesMultiplied = totalAmount;
     }
