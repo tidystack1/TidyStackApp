@@ -7,7 +7,8 @@ const SMARTSUITE_API_BASE = "https://app.smartsuite.com/api/v1";
 const APPOINTMENT_TABLE_ID = "6a6a3f6a3c3aa17a567626e0";
 const SHADCHAN_TABLE_ID = "69fb65b846b5f5c3bc8584c0";
 const TIME_ZONE = "America/New_York";
-
+const SHADCHANIM_TEAM_ID =
+  process.env.PROJECT_NINVEH_SMARTSUITE_TEAM_ID ?? "6a5fb08b3e79a33a94c3fa41";
 const APPOINTMENT = {
   title: "title",
   firstName: "sf57a9f76d",
@@ -35,6 +36,7 @@ const APPOINTMENT = {
   singleLink: "sd5pa5y8",
   shadchanLink: "sxht2aid",
   shadchanText: "s35beca45f",
+    team: "s0a9dc2c88",
 } as const;
 
 const SINGLES = {
@@ -1031,6 +1033,7 @@ function appointmentFields({
   if (shadchanText) fields[APPOINTMENT.shadchanText] = shadchanText;
 
   if (singleId) fields[APPOINTMENT.singleLink] = [singleId];
+    if (SHADCHANIM_TEAM_ID) fields[APPOINTMENT.team] = [SHADCHANIM_TEAM_ID];
   if (shadchanId) fields[APPOINTMENT.shadchanLink] = [shadchanId];
 
   return fields;
