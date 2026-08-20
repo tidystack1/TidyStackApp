@@ -505,7 +505,7 @@ export async function POST(request: NextRequest) {
       packageDate,
     );
     const weeklyIds = weeklyAfterPause.included.map((customer) => customer.id);
-    const afterWeeklyIds = uniqueIds(existingIds, weeklyIds);
+    const afterWeeklyIds = weeklyIds;
 
     await patchLinkedCustomers({
       apiKey,

@@ -7,7 +7,8 @@ const SMARTSUITE_API_BASE = "https://app.smartsuite.com/api/v1";
 const APPOINTMENT_TABLE_ID = "6a6a3f6a3c3aa17a567626e0";
 const SHADCHAN_TABLE_ID = "69fb65b846b5f5c3bc8584c0";
 const TIME_ZONE = "America/New_York";
-
+const SHADCHANIM_TEAM_ID =
+  process.env.PROJECT_NINVEH_SMARTSUITE_TEAM_ID ?? "6a5fb08b3e79a33a94c3fa41";
 const APPOINTMENT = {
   title: "title",
   firstName: "sf57a9f76d",
@@ -35,6 +36,7 @@ const APPOINTMENT = {
   singleLink: "sd5pa5y8",
   shadchanLink: "sxht2aid",
   shadchanText: "s35beca45f",
+    team: "s0a9dc2c88",
 } as const;
 
 const SINGLES = {
@@ -97,6 +99,97 @@ const SINGLES_RELATIONSHIP_CHOICES: Array<{ value: string; label: string }> = [
   { value: "nftMf", label: "Father" },
   { value: "OTHER_VALUE", label: "Other" },
 ];
+
+/* ---------------------------------------------------------------------------
+ * Live SmartSuite schema.
+ *
+ * The tables above are partial: SINGLES_RELATIONSHIP_CHOICES has only 4 of the
+ * 9 options the booking form offers (Friend = "MrFq7" is used by singles-pdf
+ * but missing here), so Parent/Sibling/Friend/etc. all collapse to
+ * "OTHER_VALUE". Instead of hand-maintaining these we read the real option list
+ * from GET /applications/{id}/ (structure[].params.choices) at request time and
+ * keep the tables below as a fallback if that call fails.
+ * ------------------------------------------------------------------------- */
+
+type SmartSuiteChoice = { value: string; label: string };
+
+type SmartSuiteFieldMeta = { fieldType: string; choices: SmartSuiteChoice[] };
+
+type TableSchema = Map<string, SmartSuiteFieldMeta>;
+
+function parseSchema(app: unknown): TableSchema {
+  const schema: TableSchema = new Map();
+  const structure =
+    isRecord(app) && Array.isArray(app.structure) ? (app.structure as unknown[]) : [];
+  for (const raw of structure) {
+    if (!isRecord(raw)) continue;
+    const slug = text(raw.slug);
+    if (!slug) continue;
+    const params = isRecord(raw.params) ? raw.params : {};
+    const rawChoices = Array.isArray(params.choices) ? (params.choices as unknown[]) : [];
+    const choices: SmartSuiteChoice[] = [];
+    for (const choice of rawChoices) {
+      if (!isRecord(choice)) continue;
+      const value = text(choice.value);
+      if (value) choices.push({ value, label: text(choice.label) || value });
+    }
+    schema.set(slug, { fieldType: text(raw.field_type), choices });
+  }
+  return schema;
+}
+
+async function fetchSchema({
+  apiKey,
+  accountId,
+  tableId,
+}: {
+  apiKey: string;
+  accountId: string;
+  tableId: string;
+}): Promise<TableSchema> {
+  const app = await smartSuiteJson<unknown>({
+    apiKey,
+    accountId,
+    path: `/applications/${tableId}/`,
+    method: "GET",
+  });
+  return parseSchema(app);
+}
+
+/** True when the schema says this field is a picklist (has options). */
+function hasChoices(schema: TableSchema | undefined, slug: string): boolean {
+  return (schema?.get(slug)?.choices.length ?? 0) > 0;
+}
+
+function resolveChoice(
+  schema: TableSchema | undefined,
+  slug: string,
+  raw: unknown,
+  fallback: SmartSuiteChoice[],
+): { value?: string; source: "schema" | "fallback" | "none" } {
+  const live = schema?.get(slug)?.choices ?? [];
+  if (live.length) {
+    const hit = matchChoice(raw, live);
+    if (hit) return { value: hit, source: "schema" };
+  }
+  const hit = matchChoice(raw, fallback);
+  return hit ? { value: hit, source: "fallback" } : { source: "none" };
+}
+
+/**
+ * Single select wants the option id as a string, multiple select wants an array
+ * of ids. With no schema we keep the historical shape so behaviour is unchanged.
+ */
+function choicePayload(
+  schema: TableSchema | undefined,
+  slug: string,
+  value: string,
+  fallbackAsArray: boolean,
+): unknown {
+  const fieldType = schema?.get(slug)?.fieldType;
+  if (!fieldType) return fallbackAsArray ? [value] : value;
+  return fieldType.includes("multiple") ? [value] : value;
+}
 
 type SmartSuiteListResponse = {
   items?: unknown[];
@@ -699,6 +792,99 @@ function recordHasFiles(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0;
 }
 
+/* ---------------------------------------------------------------------------
+ * Fuzzy shadchan matching.
+ *
+ * The SimplyBook provider list and the SHADCHAN table are maintained by hand,
+ * so spellings drift ("Maargalit"/"Margalit", "Rivky"/"Rivkie"), middle names
+ * appear on one side only ("Freyda Leah Falik"/"Freyda Falik"), and honorifics
+ * come and go ("Rabbi Meir Levi"/"Meir Levi"). The shadchan list is small and
+ * every name is unique, so approximate matching is safe here.
+ *
+ * NOTE: deliberately NOT used for Singles - merging two different singles
+ * because their names look alike would be far worse than creating a duplicate.
+ * ------------------------------------------------------------------------- */
+
+const HONORIFIC = /^(rabbi|reb|rav|harav|rebbetzin|mrs|mr|ms|dr)$/;
+
+const SHADCHAN_MATCH_THRESHOLD = 0.82;
+
+function nameTokens(value: string): string[] {
+  return value
+    .split(/[\s,]+/)
+    .map((part) => fold(part))
+    .filter((part) => part.length > 0 && !HONORIFIC.test(part));
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev: number[] = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const curr: number[] = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[b.length];
+}
+
+function similarity(a: string, b: string): number {
+  const max = Math.max(a.length, b.length);
+  if (max === 0) return 1;
+  return 1 - levenshtein(a, b) / max;
+}
+
+/** Every spelling of a SHADCHAN record's name we can compare against. */
+function shadchanNameVariants(record: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const title = text(record.title);
+  if (title) out.push(title);
+  const nameField = record[SHADCHAN_NAME_FIELD];
+  if (isRecord(nameField)) {
+    const joined = `${text(nameField.first_name)} ${text(nameField.last_name)}`.trim();
+    if (joined) out.push(joined);
+    const root = text(nameField.sys_root);
+    if (root) out.push(root);
+  } else {
+    const plain = text(nameField);
+    if (plain) out.push(plain);
+  }
+  return out;
+}
+
+/** 0 = no match, 1 = exact once normalised. */
+function shadchanScore(provider: string, record: Record<string, unknown>): number {
+  const providerTokens = nameTokens(provider);
+  const providerJoined = providerTokens.join("");
+  if (!providerJoined) return 0;
+
+  let best = 0;
+  for (const variant of shadchanNameVariants(record)) {
+    const recordTokens = nameTokens(variant);
+    const recordJoined = recordTokens.join("");
+    if (!recordJoined) continue;
+
+    if (recordJoined === providerJoined) return 1;
+
+    // One side carries an extra middle name: "Freyda Leah Falik" / "Freyda Falik"
+    const [small, large] =
+      providerTokens.length <= recordTokens.length
+        ? [providerTokens, recordTokens]
+        : [recordTokens, providerTokens];
+    if (small.length >= 2 && small.every((token) => large.includes(token))) {
+      best = Math.max(best, 0.95);
+      continue;
+    }
+
+    best = Math.max(best, similarity(providerJoined, recordJoined));
+  }
+  return best;
+}
+
 function namesMatch(
   record: Record<string, unknown>,
   first: string,
@@ -758,7 +944,6 @@ async function findShadchanId({
 }): Promise<string | undefined> {
   const cleaned = cleanProviderName(providerName);
   if (!cleaned) return undefined;
-  const { first, last } = splitName(cleaned);
   const items = await listRecords({
     apiKey,
     accountId,
@@ -766,24 +951,45 @@ async function findShadchanId({
     filter: { operator: "and", fields: [] },
     limit: 200,
   });
-  const match = items.find((item) => {
-    if (namesMatch(item, first, last, SHADCHAN_NAME_FIELD)) return true;
-    const title = fold(text(item.title));
-    return title.length > 0 && title === fold(cleaned);
-  });
-  return match && typeof match.id === "string" ? match.id : undefined;
+
+  const scored = items
+    .map((item) => ({ item, score: shadchanScore(cleaned, item) }))
+    .filter((entry) => entry.score >= SHADCHAN_MATCH_THRESHOLD)
+    .sort((a, b) => b.score - a.score);
+
+  if (!scored.length) return undefined;
+
+  // Two records scoring identically means we cannot tell them apart - better to
+  // leave the link empty and warn than to attach the appointment to the wrong
+  // shadchan.
+  if (scored.length > 1 && scored[0].score < 1 && scored[1].score === scored[0].score) {
+    return undefined;
+  }
+
+  const match = scored[0].item;
+  return typeof match.id === "string" ? match.id : undefined;
 }
 
-function singlesIncomingFields(booking: Record<string, unknown>) {
+function singlesIncomingFields(
+  booking: Record<string, unknown>,
+  schema?: TableSchema,
+) {
   const first = nonempty(booking.first_name);
   const last = nonempty(booking.last_name);
   const contact = splitName(booking.contact_name);
-  const gender = matchChoice(booking.gender, SINGLES_GENDER_CHOICES);
-  const height = matchChoice(booking.height, SINGLES_HEIGHT_CHOICES);
-  const longTermPlan = matchChoice(booking.long_term_plan, SINGLES_LONG_TERM_PLAN_CHOICES);
+  const gender = resolveChoice(schema, SINGLES.gender, booking.gender, SINGLES_GENDER_CHOICES).value;
+  const height = resolveChoice(schema, SINGLES.height, booking.height, SINGLES_HEIGHT_CHOICES).value;
+  // NOTE: SINGLES.longTermPlan is `partner_category_type`, which singles-pdf
+  // reads as the plan wanted *in a spouse*. Left as-is pending the right slug.
+  const longTermPlan = resolveChoice(
+    schema,
+    SINGLES.longTermPlan,
+    booking.long_term_plan,
+    SINGLES_LONG_TERM_PLAN_CHOICES,
+  ).value;
   const relationship =
-    matchChoice(booking.relationship, SINGLES_RELATIONSHIP_CHOICES) ??
-    (nonempty(booking.relationship) ? "OTHER_VALUE" : undefined);
+    resolveChoice(schema, SINGLES.relationship, booking.relationship, SINGLES_RELATIONSHIP_CHOICES)
+      .value ?? (nonempty(booking.relationship) ? "OTHER_VALUE" : undefined);
 
   const fields: Record<string, unknown> = {};
   const name = fullNamePayload(first, last);
@@ -796,12 +1002,16 @@ function singlesIncomingFields(booking: Record<string, unknown>) {
   if (email) fields[SINGLES.email] = email;
   const birthday = datePayload(birthdayValue(booking), false);
   if (birthday) fields[SINGLES.birthday] = birthday;
-  if (gender) fields[SINGLES.gender] = gender;
-  if (height) fields[SINGLES.height] = height;
-  if (longTermPlan) fields[SINGLES.longTermPlan] = [longTermPlan];
+  if (gender) fields[SINGLES.gender] = choicePayload(schema, SINGLES.gender, gender, false);
+  if (height) fields[SINGLES.height] = choicePayload(schema, SINGLES.height, height, false);
+  if (longTermPlan) {
+    fields[SINGLES.longTermPlan] = choicePayload(schema, SINGLES.longTermPlan, longTermPlan, true);
+  }
   const bio = nonempty(booking.bio);
   if (bio) fields[SINGLES.bio] = bio;
-  if (relationship) fields[SINGLES.relationship] = relationship;
+  if (relationship) {
+    fields[SINGLES.relationship] = choicePayload(schema, SINGLES.relationship, relationship, false);
+  }
   return fields;
 }
 
@@ -809,10 +1019,12 @@ function appointmentFields({
   booking,
   singleId,
   shadchanId,
+  schema,
 }: {
   booking: Record<string, unknown>;
   singleId?: string;
   shadchanId?: string;
+  schema?: TableSchema;
 }) {
   const fields: Record<string, unknown> = {};
   const bookingCode = nonempty(booking.booking_code);
@@ -844,11 +1056,51 @@ function appointmentFields({
   const height = nonempty(booking.height);
   if (height) fields[APPOINTMENT.height] = height;
 
+  // If these are picklists on the appointment table, a raw label is silently
+  // dropped - they need the option id. Plain text fields keep the raw string.
   const relationship = nonempty(booking.relationship);
-  if (relationship) fields[APPOINTMENT.relationship] = relationship;
+  if (relationship) {
+    if (hasChoices(schema, APPOINTMENT.relationship)) {
+      const resolved = resolveChoice(
+        schema,
+        APPOINTMENT.relationship,
+        relationship,
+        SINGLES_RELATIONSHIP_CHOICES,
+      );
+      if (resolved.value) {
+        fields[APPOINTMENT.relationship] = choicePayload(
+          schema,
+          APPOINTMENT.relationship,
+          resolved.value,
+          false,
+        );
+      }
+    } else {
+      fields[APPOINTMENT.relationship] = relationship;
+    }
+  }
 
   const longTermPlan = nonempty(booking.long_term_plan);
-  if (longTermPlan) fields[APPOINTMENT.longTermPlan] = longTermPlan;
+  if (longTermPlan) {
+    if (hasChoices(schema, APPOINTMENT.longTermPlan)) {
+      const resolved = resolveChoice(
+        schema,
+        APPOINTMENT.longTermPlan,
+        longTermPlan,
+        SINGLES_LONG_TERM_PLAN_CHOICES,
+      );
+      if (resolved.value) {
+        fields[APPOINTMENT.longTermPlan] = choicePayload(
+          schema,
+          APPOINTMENT.longTermPlan,
+          resolved.value,
+          false,
+        );
+      }
+    } else {
+      fields[APPOINTMENT.longTermPlan] = longTermPlan;
+    }
+  }
 
   const bio = nonempty(booking.bio);
   if (bio) fields[APPOINTMENT.bio] = bio;
@@ -884,9 +1136,56 @@ function appointmentFields({
   if (shadchanText) fields[APPOINTMENT.shadchanText] = shadchanText;
 
   if (singleId) fields[APPOINTMENT.singleLink] = [singleId];
+    if (SHADCHANIM_TEAM_ID) fields[APPOINTMENT.team] = [SHADCHANIM_TEAM_ID];
   if (shadchanId) fields[APPOINTMENT.shadchanLink] = [shadchanId];
 
   return fields;
+}
+
+/** ?debug=1 - report how each picklist value resolves. Writes nothing. */
+function debugReport(
+  booking: Record<string, unknown>,
+  singlesSchema: TableSchema | undefined,
+  appointmentSchema: TableSchema | undefined,
+) {
+  const describe = (
+    schema: TableSchema | undefined,
+    slug: string,
+    raw: unknown,
+    fallback: SmartSuiteChoice[],
+  ) => {
+    const meta = schema?.get(slug);
+    const resolved = resolveChoice(schema, slug, raw, fallback);
+    return {
+      slug,
+      incoming: nonempty(raw) ?? null,
+      field_type: meta?.fieldType ?? null,
+      live_choices: meta?.choices ?? null,
+      resolved_value: resolved.value ?? null,
+      resolved_from: resolved.source,
+    };
+  };
+  const suggestions = suggestionsMatch(booking);
+  return {
+    ok: true,
+    debug: true,
+    booking_keys: Object.keys(booking),
+    suggestions: {
+      value: suggestions.value ?? null,
+      matched_label: suggestions.label ?? null,
+      zap_forwards_additional_fields: Array.isArray(booking.additional_fields),
+    },
+    singles: [
+      describe(singlesSchema, SINGLES.gender, booking.gender, SINGLES_GENDER_CHOICES),
+      describe(singlesSchema, SINGLES.height, booking.height, SINGLES_HEIGHT_CHOICES),
+      describe(singlesSchema, SINGLES.longTermPlan, booking.long_term_plan, SINGLES_LONG_TERM_PLAN_CHOICES),
+      describe(singlesSchema, SINGLES.relationship, booking.relationship, SINGLES_RELATIONSHIP_CHOICES),
+    ],
+    appointment: [
+      describe(appointmentSchema, APPOINTMENT.relationship, booking.relationship, SINGLES_RELATIONSHIP_CHOICES),
+      describe(appointmentSchema, APPOINTMENT.longTermPlan, booking.long_term_plan, SINGLES_LONG_TERM_PLAN_CHOICES),
+    ],
+  };
 }
 
 export async function OPTIONS() {
@@ -909,6 +1208,25 @@ export async function POST(req: NextRequest) {
 
     const warnings: string[] = [];
 
+    const schemaFor = (tableId: string, label: string) =>
+      fetchSchema({ apiKey, accountId, tableId }).catch((error) => {
+        warnings.push(
+          `${label} schema unavailable, using fallback choices: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return undefined;
+      });
+
+    const [singlesSchema, appointmentSchema] = await Promise.all([
+      schemaFor(singlesTableId, "Singles"),
+      schemaFor(appointmentTableId, "Appointment"),
+    ]);
+
+    if (req.nextUrl.searchParams.get("debug") === "1") {
+      return json({ ...debugReport(booking, singlesSchema, appointmentSchema), warnings });
+    }
+
     const [resumeFile, photoFile] = await Promise.all([
       maybeDownload(booking.resume_url, booking.resume_name, "resume").catch((error) => {
         warnings.push(error instanceof Error ? error.message : String(error));
@@ -928,7 +1246,7 @@ export async function POST(req: NextRequest) {
       last,
     });
 
-    const singlesFields = singlesIncomingFields(booking);
+    const singlesFields = singlesIncomingFields(booking, singlesSchema);
     let singleId: string | undefined;
     let singleAction: "created" | "updated" | "linked" | "skipped" = "skipped";
 
@@ -1009,7 +1327,7 @@ export async function POST(req: NextRequest) {
       apiKey,
       accountId,
       tableId: appointmentTableId,
-      fields: appointmentFields({ booking, singleId, shadchanId }),
+      fields: appointmentFields({ booking, singleId, shadchanId, schema: appointmentSchema }),
     });
 
     const appointmentUploads: Array<Promise<void>> = [];

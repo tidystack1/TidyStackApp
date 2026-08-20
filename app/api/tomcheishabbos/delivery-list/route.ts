@@ -7,8 +7,8 @@ const SMARTSUITE_ACCOUNT_ID = process.env.TOMCHEI_SHABBOS_SMARTSUITE_ACCOUNT_ID;
 const SMARTSUITE_RECORDS_TABLE_ID = "6925a5e5faf422df3f931169";
 const SMARTSUITE_DELIVERY_TABLE_ID = "6925b0fb90de6fdfbd33e096";
 const SMARTSUITE_DELIVERY_LIST_FIELD_ID = "sb1a7b32b6";
+const LINKED_CUSTOMERS_FIELD_ID = "sw5jjgei";
 
-const PACKAGE_FILTER_FIELD_ID = "sec653610f";
 const ROUTE_NUMBER_FIELD_ID = "sba911ff35";
 const BOX_SIZE_FIELD_ID = "s2baca63ff";
 const CUSTOMER_ID_FIELD_ID = "sc9e87f825";
@@ -60,11 +60,11 @@ export async function POST(request: NextRequest) {
     if (!records || records.items.length === 0) {
       return NextResponse.json(
         {
-          message: "No delivery records found for this package",
+          error: "No recipients linked to this distribution - nothing to generate",
           recordCount: 0,
           routeCount: 0,
         },
-        { status: 200 },
+        { status: 422 },
       );
     }
 
@@ -151,26 +151,50 @@ export async function POST(request: NextRequest) {
 async function fetchSmartSuiteRecords(
   packageId: string,
 ): Promise<SmartSuiteResponse> {
+  const headers = {
+    Authorization: `Token ${SMARTSUITE_API_KEY}`,
+    "ACCOUNT-ID": SMARTSUITE_ACCOUNT_ID || "",
+    "Content-Type": "application/json",
+  };
+
+  // Read the linked recipients straight off the distribution record.
+  const distResponse = await fetch(
+    `https://app.smartsuite.com/api/v1/applications/${SMARTSUITE_DELIVERY_TABLE_ID}/records/${packageId}/`,
+    { headers },
+  );
+
+  if (!distResponse.ok) {
+    throw new Error(
+      `SmartSuite API error: ${distResponse.status} ${distResponse.statusText}`,
+    );
+  }
+
+  const distribution = await distResponse.json();
+  const rawLinked = isRecord(distribution)
+    ? distribution[LINKED_CUSTOMERS_FIELD_ID]
+    : null;
+  const recipientIds = new Set<string>(
+    (Array.isArray(rawLinked) ? rawLinked : [])
+      .map((entry: unknown) =>
+        typeof entry === "string"
+          ? entry
+          : isRecord(entry) && typeof entry.id === "string"
+            ? entry.id
+            : "",
+      )
+      .filter((entryId: string) => entryId.length > 0),
+  );
+
+  if (recipientIds.size === 0) {
+    return { items: [], total: 0, offset: 0, limit: 1000, time: "" };
+  }
+
   const url = `https://app.smartsuite.com/api/v1/applications/${SMARTSUITE_RECORDS_TABLE_ID}/records/list/`;
 
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Token ${SMARTSUITE_API_KEY}`,
-      "ACCOUNT-ID": SMARTSUITE_ACCOUNT_ID || "",
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify({
-      filter: {
-        operator: "and",
-        fields: [
-          {
-            field: PACKAGE_FILTER_FIELD_ID,
-            comparison: "has_any_of",
-            value: [packageId],
-          },
-        ],
-      },
       hydrated: true,
       limit: 1000,
     }),
@@ -182,7 +206,12 @@ async function fetchSmartSuiteRecords(
     );
   }
 
-  return response.json() as Promise<SmartSuiteResponse>;
+  const all = (await response.json()) as SmartSuiteResponse;
+  const items = (all.items || []).filter((record) =>
+    recipientIds.has(record.id),
+  );
+
+  return { ...all, items, total: items.length };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -299,7 +299,6 @@ export async function downloadFormFile(filePath: string): Promise<Uint8Array | n
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > 0) return bytes;
   }
-
   return null;
 }
 

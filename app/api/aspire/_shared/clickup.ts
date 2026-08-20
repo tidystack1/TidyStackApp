@@ -109,12 +109,12 @@ export function parseDateToMs(value: string): number | null {
     const month = Number(us[1]);
     const day = Number(us[2]);
     const year = Number(us[3]);
-    return Date.UTC(year, month - 1, day);
+    return Date.UTC(year, month - 1, day, 12);
   }
 
   const isoDate = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoDate) {
-    return Date.UTC(Number(isoDate[1]), Number(isoDate[2]) - 1, Number(isoDate[3]));
+        return Date.UTC(Number(isoDate[1]), Number(isoDate[2]) - 1, Number(isoDate[3]), 12);
   }
 
   const parsed = Date.parse(trimmed);
